@@ -782,6 +782,145 @@ class MultiAgentFleet:
                 ],
             }
 
+    def execute(self, agent_id: str, task_description: str) -> Dict[str, Any]:
+        """
+        Execute a task using a real AI agent (Claude Code).
+        Each agent type has a specialized prompt for their domain.
+        This makes the fleet actually DO work, not just route tasks.
+        """
+        if agent_id not in self._agents:
+            return {"success": False, "error": f"Agent '{agent_id}' not found"}
+
+        agent = self._agents[agent_id]
+        agent_name = agent["name"]
+        agent_role = agent["role"]
+
+        # Specialized prompts per agent type
+        prompts = {
+            "code": f"""You are {agent_name}, an expert programmer.
+TASK: {task_description}
+RULES:
+1. Write complete, working code
+2. Create files in the current directory
+3. Include a main() function that demonstrates the solution
+4. Make it executable: python3 <filename>
+Return: JSON {{"files": ["filename.py"], "summary": "what was built"}}""",
+
+            "research": f"""You are {agent_name}, an expert researcher.
+TASK: {task_description}
+RULES:
+1. Research thoroughly and provide detailed findings
+2. Return a comprehensive markdown report with sources
+3. Include key insights, patterns, and recommendations
+Return: JSON {{"report": "...", "sources": [], "summary": "..."}}""",
+
+            "build": f"""You are {agent_name}, an expert builder and DevOps engineer.
+TASK: {task_description}
+RULES:
+1. Create all necessary files for the project
+2. Set up build system, dependencies, configuration
+3. Create a Makefile or build script if appropriate
+4. Include setup instructions in README.md
+Return: JSON {{"files": [...], "build_steps": [...], "summary": "..."}}""",
+
+            "debug": f"""You are {agent_name}, an expert debugger.
+TASK: {task_description}
+RULES:
+1. Diagnose the problem from the description
+2. Find the root cause
+3. Fix the bug with minimal changes
+4. Verify the fix works
+Return: JSON {{"root_cause": "...", "fix_applied": "...", "files_fixed": [...]}}""",
+
+            "plan": f"""You are {agent_name}, an expert planner and strategist.
+TASK: {task_description}
+RULES:
+1. Break down the task into clear steps
+2. Identify dependencies and risks
+3. Estimate effort for each step
+4. Return a structured plan
+Return: JSON {{"plan": [...steps...], "risks": [...], "summary": "..."}}""",
+
+            "evolve": f"""You are {agent_name}, an expert in AI self-improvement.
+TASK: {task_description}
+RULES:
+1. Analyze the current state
+2. Identify improvement opportunities
+3. Apply optimizations or fixes
+4. Return a summary of what was improved
+Return: JSON {{"improvements": [...], "metrics_before": {{}}, "metrics_after": {{}}}}""",
+        }
+
+        prompt = prompts.get(agent_role, f"""You are {agent_name}.
+TASK: {task_description}
+RULES:
+1. Complete the task thoroughly
+2. Return results as JSON {{"result": "...", "summary": "..."}}""")
+
+        try:
+            # Get Claude path
+            claude_path_result = subprocess.run(
+                ["bash", "-lc", "which claude"],
+                capture_output=True, text=True, timeout=5
+            )
+            claude_path = (claude_path_result.stdout.strip() if claude_path_result.returncode == 0
+                          else "/Users/a/.nvm/versions/node/v22.22.1/bin/claude")
+
+            # Create workspace for this agent task
+            agent_workspace = WORKSPACE_DIR / f"agent_{agent_id}_{int(time.time())}"
+            agent_workspace.mkdir(parents=True, exist_ok=True)
+
+            result = subprocess.run(
+                [claude_path, "--print", "-p", prompt, "--model", "sonnet",
+                 "--add-dir", str(agent_workspace)],
+                capture_output=True, text=True, timeout=180,
+                cwd=str(agent_workspace),
+                env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
+                     "PATH": str(Path(claude_path).parent) + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
+            )
+
+            output = result.stdout.strip()
+            created_files = [f.name for f in agent_workspace.iterdir()
+                           if f.is_file() and not f.name.startswith('.')]
+
+            success = result.returncode == 0 and len(output) > 0
+
+            # Parse JSON response if present
+            summary = ""
+            try:
+                json_match = re.search(r'\{[^{}]*"[^"]+":', output, re.DOTALL)
+                if json_match:
+                    summary = output[:200]
+            except:
+                summary = output[:200]
+
+            self.complete(agent_id, score=1.0 if success else 0.0)
+
+            return {
+                "success": success,
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "task": task_description,
+                "output": output[:500],
+                "files_created": created_files,
+                "workspace": str(agent_workspace),
+                "rc": result.returncode,
+            }
+
+        except subprocess.TimeoutExpired:
+            self.complete(agent_id, score=0.0)
+            return {"success": False, "agent_id": agent_id, "error": "Claude Code timed out (180s)"}
+        except Exception as e:
+            self.complete(agent_id, score=0.0)
+            return {"success": False, "agent_id": agent_id, "error": str(e)}
+
+    def execute_async(self, agent_id: str, task_description: str) -> str:
+        """Execute task in background, return task_id for tracking"""
+        task_id = f"task_{int(time.time() * 1000)}"
+        thread = threading.Thread(target=self.execute, args=(agent_id, task_description))
+        thread.start()
+        return task_id
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # SKILL FORGE
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -1228,6 +1367,10 @@ if __name__ == "__main__":
         Generate code from natural language.
         Uses templates for common patterns (fast),
         Claude Code for complex/unknown requests (powerful).
+
+        SELF-HEALING LOOP:
+        If generated code fails to execute, Claude Code automatically
+        fixes the error and retries — up to 3 times.
         """
         # Create project directory
         project_name = re.sub(r"[^a-z0-9_]", "_", description[:40].lower())
@@ -1246,21 +1389,88 @@ if __name__ == "__main__":
         elif any(k in desc_lower for k in ["cli", "command", "tool"]):
             template_key = "cli_tool"
 
-        # Use Claude Code for complex requests or when no template matches
+        # Determine generation method
         use_claude = (self.claude_available and
                       template_key is None and
-                      len(description) > 20)  # Long/complex descriptions → Claude
+                      len(description) > 20)
 
-        if use_claude:
-            return self._generate_with_claude(description, project_name, project_dir)
-        elif template_key:
-            return self._generate_with_template(description, project_name, project_dir, template_key)
+        if template_key:
+            result = self._generate_with_template(description, project_name, project_dir, template_key)
+            return result
+        elif use_claude or (self.claude_available and not template_key):
+            # SELF-HEALING LOOP: Generate → Execute → Fix → Repeat (up to 3 times)
+            max_attempts = 3
+            last_error = None
+            last_result = None
+
+            for attempt in range(1, max_attempts + 1):
+                if attempt == 1:
+                    # First attempt: generate new code
+                    result = self._generate_with_claude(description, project_name, project_dir)
+                else:
+                    # Subsequent attempts: fix existing code
+                    fix_result = self._claude_fix_code(
+                        description, project_dir, last_error, attempt
+                    )
+                    result = {
+                        "project_name": project_name,
+                        "project_dir": str(project_dir),
+                        "files": fix_result["files"],
+                        "template_used": f"claude_code_fix_attempt_{attempt}",
+                        "claude_output": fix_result.get("claude_output", ""),
+                        "syntax_ok": fix_result.get("syntax_ok", False),
+                        "success": fix_result["success"],
+                        "attempt": attempt,
+                    }
+
+                # Execute the generated/fixed code
+                exec_result = self.execute(result["project_dir"])
+                exec_success = exec_result.get("success", False)
+
+                if exec_success:
+                    # SUCCESS — code ran without errors
+                    result["execution"] = exec_result
+                    result["self_healed"] = (attempt > 1)
+                    result["attempts"] = attempt
+                    if attempt > 1:
+                        self.archive.log_success(
+                            f"claude_code:{project_name}",
+                            f"claude_code_self_healed",
+                            f"Fixed in {attempt} attempts",
+                            0.0,
+                            metadata={"description": description, "attempts": attempt}
+                        )
+                    return result
+                else:
+                    # FAILURE — capture error for next fix attempt
+                    last_error = exec_result.get("stderr", "") or exec_result.get("error", "Unknown error")
+                    last_result = result
+                    self.archive.log_failure(
+                        f"claude_code:{project_name}",
+                        f"claude_code_attempt_{attempt}",
+                        last_error,
+                        0.0,
+                        metadata={"description": description, "attempt": attempt}
+                    )
+
+                # If this was a template (not Claude Code), break
+                if result.get("template_used") != "claude_code" and not result.get("template_used", "").startswith("claude_code"):
+                    break
+
+            # All attempts failed
+            return {
+                "project_name": project_name,
+                "project_dir": str(project_dir),
+                "files": last_result.get("files", []) if last_result else [],
+                "template_used": "claude_code_exhausted",
+                "execution": exec_result if 'exec_result' in dir() else {},
+                "self_healed": False,
+                "attempts": max_attempts,
+                "final_error": last_error,
+            }
         else:
-            # Short or unrecognized descriptions → Claude (it's good at everything)
-            if self.claude_available:
-                return self._generate_with_claude(description, project_name, project_dir)
-            else:
-                return self._generate_with_template(description, project_name, project_dir, "cli_tool")
+            # No Claude Code, use template
+            return self._generate_with_template(description, project_name, project_dir, "cli_tool")
     
     def _generate_with_claude(self, description: str, project_name: str,
                               project_dir: Path) -> Dict[str, Any]:
@@ -1414,7 +1624,102 @@ IMPORTANT: Write the actual code to files. Don't just describe it. Make it work.
                 "error": str(e),
                 "success": False,
             }
-    
+
+    def _claude_fix_code(self, description: str, project_dir: Path,
+                         previous_error: str, attempt: int) -> Dict[str, Any]:
+        """
+        Use Claude Code to fix code that failed execution.
+        Called by the self-healing loop when execute() fails.
+        """
+        # Read existing files to understand context
+        existing_code = {}
+        for f in project_dir.iterdir():
+            if f.is_file() and not f.name.startswith('.') and f.suffix == '.py':
+                existing_code[f.name] = f.read_text()[:2000]  # First 2000 chars
+
+        # Build the fix prompt
+        fix_prompt = f"""You are a bug fixer. Fix the error in the code.
+
+ORIGINAL REQUEST: {description}
+
+ERROR OCCURRED:
+{previous_error}
+
+EXISTING FILES:
+{json.dumps(existing_code, indent=2, ensure_ascii=False)}
+
+RULES:
+1. Read the existing files to understand the code
+2. Identify the bug causing the error
+3. Fix ONLY the problematic parts
+4. Write the corrected files back to disk
+5. Make sure the code is syntactically correct and runs
+
+IMPORTANT: Fix the actual error. Do not rewrite everything. Be surgical.
+"""
+
+        try:
+            result = subprocess.run(
+                [
+                    self._claude_path, "--print",
+                    "-p", fix_prompt,
+                    "--add-dir", str(project_dir),
+                    "--output-format", "text",
+                    "--model", "sonnet",
+                ],
+                capture_output=True, text=True, timeout=120,
+                cwd=str(project_dir),
+                env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
+                     "PATH": str(Path(self._claude_path).parent) + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
+            )
+
+            output = result.stdout
+            created_files = [f.name for f in project_dir.iterdir()
+                           if f.is_file() and not f.name.startswith('.') and f.suffix == '.py']
+
+            # Verify syntax of fixed files
+            syntax_ok = True
+            for f in project_dir.glob("*.py"):
+                sc = subprocess.run([sys.executable, "-m", "py_compile", str(f)],
+                                  capture_output=True, text=True, timeout=10)
+                if sc.returncode != 0:
+                    syntax_ok = False
+                    break
+
+            success = (result.returncode == 0 and len(created_files) > 0)
+
+            self.archive.log_success(
+                f"claude_fix:{project_dir.name}",
+                f"claude_fix_attempt_{attempt}",
+                f"Fixed: {', '.join(created_files)}",
+                0.0,
+                metadata={"error": previous_error[:200], "attempt": attempt}
+            )
+
+            return {
+                "files": created_files,
+                "claude_output": output[:500],
+                "syntax_ok": syntax_ok,
+                "success": success,
+                "attempt": attempt,
+                "error": None,
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "files": [f.name for f in project_dir.iterdir() if f.is_file() and f.suffix == '.py'],
+                "error": "Claude Code fix timed out",
+                "success": False,
+                "attempt": attempt,
+            }
+        except Exception as e:
+            return {
+                "files": [],
+                "error": str(e),
+                "success": False,
+                "attempt": attempt,
+            }
+
     def _generate_with_template(self, description: str, project_name: str,
                                 project_dir: Path, template_key: str = "cli_tool") -> Dict[str, Any]:
         """Template-based fallback when Claude Code is unavailable"""
@@ -2032,8 +2337,25 @@ class EvolutionEngine:
             layer2_analysis = f"Top failure: '{top_rc}' ({rc_counts[top_rc]}x)"
             
             if rc_counts[top_rc] >= 3:
-                actions.append(f"FIX: Address root cause '{top_rc}' — add preventive check")
+                fix_desc = f"Address root cause '{top_rc}' — add preventive check"
+                actions.append(f"FIX: {fix_desc}")
                 methods_used.append("archive_based")
+
+                # REAL CODE FIX: Use Claude Code to actually fix the issue
+                most_recent_failure = failures[0] if failures else {}
+                fix_result = self._claude_apply_fix(
+                    failure_info={
+                        "task_name": most_recent_failure.get("task_name", top_rc),
+                        "root_cause": top_rc,
+                        "error": most_recent_failure.get("error", ""),
+                    },
+                    fix_description=fix_desc
+                )
+                if fix_result and fix_result.get("success"):
+                    actions.append(f"CODE_FIXED: {fix_result.get('fix_applied', 'applied')}")
+                else:
+                    actions.append(f"CODE_FIX_ATTEMPTED: {fix_result.get('error', 'no result') if fix_result else 'failed'}")
+
                 self.knowledge.add(
                     title=f"Root Cause: {top_rc}",
                     content=f"'{top_rc}' detected {rc_counts[top_rc]} times. Preventive measures needed.",
@@ -2112,7 +2434,76 @@ class EvolutionEngine:
         evo_dir.mkdir(parents=True, exist_ok=True)
         path = evo_dir / f"cycle_{entry.cycle:05d}.json"
         path.write_text(json.dumps(asdict(entry), indent=2, ensure_ascii=False))
-    
+
+    def _claude_apply_fix(self, failure_info: Dict, fix_description: str) -> Optional[Dict]:
+        """
+        Use Claude Code to actually fix code based on failure analysis.
+        This is the CORE of real autonomous evolution.
+        """
+        try:
+            # Get Claude path
+            claude_path_result = subprocess.run(
+                ["bash", "-lc", "which claude"],
+                capture_output=True, text=True, timeout=5
+            )
+            claude_path = (claude_path_result.stdout.strip() if claude_path_result.returncode == 0
+                          else "/Users/a/.nvm/versions/node/v22.22.1/bin/claude")
+
+            task_name = failure_info.get("task_name", "unknown")
+            root_cause = failure_info.get("root_cause", "unknown")
+            error_msg = failure_info.get("error", "")
+
+            fix_prompt = f"""You are an expert code evolution agent. Your job is to FIX failing code.
+
+FAILURE INFO:
+- Task: {task_name}
+- Root Cause: {root_cause}
+- Error: {error_msg}
+
+FIX REQUIRED: {fix_description}
+
+STEPS:
+1. Search for relevant code files in the workspace: ~/.nexus/workspace/
+2. Find files related to this task
+3. Identify the exact bug causing the failure
+4. Fix the bug
+5. Verify the fix is syntactically correct
+
+RULES:
+- Fix ONLY the problematic parts, don't rewrite everything
+- If the file doesn't exist, create a fixed version
+- Write the fixed code to the same file path
+- After fixing, verify with: python3 -m py_compile <filename>
+
+Return a JSON summary:
+{{"file_fixed": "filename.py", "fix_applied": "description of what was changed", "verified": true/false}}
+"""
+
+            result = subprocess.run(
+                [claude_path, "--print", "-p", fix_prompt, "--model", "sonnet"],
+                capture_output=True, text=True, timeout=120,
+                env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
+                     "PATH": str(Path(claude_path).parent) + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
+            )
+
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                try:
+                    json_match = re.search(r'\{[^{}]*"file_fixed"[^{}]*\}', output, re.DOTALL)
+                    if json_match:
+                        fix_result = json.loads(json_match.group())
+                        fix_result["success"] = True
+                        fix_result["raw_output"] = output[:300]
+                        return fix_result
+                except json.JSONDecodeError:
+                    pass
+                return {"success": True, "raw_output": output[:300], "fix_applied": fix_description}
+            else:
+                return {"success": False, "error": result.stderr[:200]}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def stats(self) -> Dict[str, Any]:
         evo_dir = ARCHIVE_DIR / "evolution"
         cycles = sorted(evo_dir.glob("cycle_*.json"))
@@ -2415,6 +2806,8 @@ def main():
     parser.add_argument("--limit", "-n", type=int, default=10, help="Result limit")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--no-evolution", action="store_true", help="Disable auto-evolution")
+    parser.add_argument("--agent", "-a", help="Fleet agent ID (code, research, build, debug, plan, evolve)")
+    parser.add_argument("--task", "-t", help="Task description for fleet agent execution")
     
     args = parser.parse_args()
     
@@ -2487,12 +2880,31 @@ def main():
                 print(f"   {k}: {v}")
     
     elif args.command == "fleet":
-        fleet = nx.fleet.status()
-        print(f"\n👥 Multi-Agent Fleet — {fleet['total']} agents")
-        print(f"   Idle: {fleet['idle']} | Busy: {fleet['busy']}")
-        for agent in fleet["agents"]:
-            print(f"   • {agent['name']} ({agent['role']}) — {agent['status']}")
-            print(f"     Tasks: {agent['tasks_completed']} | Avg Score: {agent['avg_score']}")
+        if args.agent and args.task:
+            # Execute task with a real AI agent
+            print(f"\n🤖 Executing with {args.agent} agent...")
+            print(f"   Task: {args.task}")
+            result = nx.fleet.execute(args.agent, args.task)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                if result["success"]:
+                    print(f"\n✅ Agent '{result['agent_name']}' completed task")
+                    if result.get("files_created"):
+                        print(f"   Files created: {', '.join(result['files_created'])}")
+                    if result.get("output"):
+                        print(f"   Output:\n{result['output'][:500]}")
+                else:
+                    print(f"\n❌ Agent failed: {result.get('error', 'unknown error')}")
+        else:
+            fleet = nx.fleet.status()
+            print(f"\n👥 Multi-Agent Fleet — {fleet['total']} agents")
+            print(f"   Idle: {fleet['idle']} | Busy: {fleet['busy']}")
+            for agent in fleet["agents"]:
+                print(f"   • {agent['name']} ({agent['role']}) — {agent['status']}")
+                print(f"     Tasks: {agent['tasks_completed']} | Avg Score: {agent['avg_score']}")
+            print("\n   To execute a task:")
+            print("   python3 NEXUS_OS_v3.py fleet --agent code --task 'build a REST API'")
     
     elif args.command == "archive":
         patterns = nx.archive.get_patterns()
