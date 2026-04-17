@@ -1,0 +1,2244 @@
+#!/usr/bin/env python3
+"""
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                                                                                      ║
+║   ███╗   ██╗███████╗ ██████╗ ███╗   ██╗    ██╗     ██╗██╗  ██╗ ██████╗ ██████╗   ║
+║   ████╗  ██║██╔════╝██╔═══██╗████╗  ██║    ██║     ██║██║ ██╔╝██╔═══██╗██╔══██╗  ║
+║   ██╔██╗ ██║█████╗  ██║   ██║██╔██╗ ██║    ██║     ██║█████╔╝ ██║   ██║██████╔╝  ║
+║   ██║╚██╗██║██╔══╝  ██║   ██║██║╚██╗██║    ██║     ██║██╔═██╗ ██║   ██║██╔══██╗  ║
+║   ██║ ╚████║███████╗╚██████╔╝██║ ╚████║    ███████╗██║██║  ██╗╚██████╔╝██║  ██║  ║
+║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝  ║
+║                                                                                      ║
+║   Autonomous AI Operating System v3.0                                                ║
+║   Self-Evolving • Self-Healing • Self-Aware • GitHub-Ready                           ║
+║                                                                                      ║
+╚══════════════════════════════════════════════════════════════════════════════════════╝
+
+NEXUS OS is an autonomous AI operating system that improves itself through:
+  - HyperAgents 3-Layer Architecture (Task → Meta → Meta-Meta)
+  - Every action archived as reusable stepping stones
+  - Bias detection with forced alternative exploration
+  - Self-healing with root cause analysis
+  - Multi-agent fleet orchestration
+  - Twenty CRM integration
+  - Autonomous coding agent
+
+Usage:
+    python3 NEXUS_OS_v3.py status
+    python3 NEXUS_OS_v3.py evolve
+    python3 NEXUS_OS_v3.py code --desc "build a REST API"
+    python3 NEXUS_OS_v3.py task --name "fix bug" --desc "API returns 500"
+    python3 NEXUS_OS_v3.py test
+
+License: MIT
+Repository: https://github.com/nexus-os/nexus
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import traceback
+import uuid
+import hashlib
+import threading
+import argparse
+import textwrap
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from collections import defaultdict
+from datetime import datetime
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# VERSION & PATHS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+VERSION = "3.0.0"
+NEXUS_HOME = Path.home() / ".nexus"
+ARCHIVE_DIR = NEXUS_HOME / "archive"
+SKILLS_DIR = NEXUS_HOME / "skills"
+WORKSPACE_DIR = NEXUS_HOME / "workspace"
+CONFIG_FILE = NEXUS_HOME / "config.json"
+
+for _d in [NEXUS_HOME, ARCHIVE_DIR, SKILLS_DIR, WORKSPACE_DIR,
+           ARCHIVE_DIR / "evolution", ARCHIVE_DIR / "warnings"]:
+    _d.mkdir(parents=True, exist_ok=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# DATACLASSES — Using make_dataclass for Python 3.14 compat
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+# TaskStatus
+class TaskStatus(Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    RETRYING = "retrying"
+    SKIPPED = "skipped"
+
+class Priority(Enum):
+    CRITICAL = 0
+    HIGH = 1
+    MEDIUM = 2
+    LOW = 3
+
+# Bias detection levels
+class BiasLevel(Enum):
+    NONE = 0
+    MILD = 1      # 50%+
+    MODERATE = 2  # 70%+
+    SEVERE = 3    # 80%+
+    COLLAPSED = 4  # 95%+
+
+# Improvement methods
+IMPROVEMENT_METHODS = [
+    "archive_based",      # Use archive patterns
+    "knowledge_based",    # Use knowledge graph
+    "analogy_transfer",    # Cross-domain insights
+    "random_exploration",  # Try something different
+    "meta_learning",       # Learn how to learn better
+]
+
+# ─── Stepping Stone ────────────────────────────────────────────────────────────
+@dataclass
+class SteppingStone:
+    id: str
+    type: str  # "success" or "failure"
+    task_name: str
+    approach: str
+    result_summary: str = ""
+    error_summary: str = ""
+    duration: float = 0.0
+    timestamp: float = 0.0
+    root_cause: str = ""
+    lessons: List[str] = field(default_factory=list)
+    next_approaches: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+# ─── Task ──────────────────────────────────────────────────────────────────────
+@dataclass
+class Task:
+    id: str
+    name: str
+    description: str
+    status: TaskStatus = TaskStatus.PENDING
+    priority: Priority = Priority.MEDIUM
+    created_at: float = field(default_factory=time.time)
+    started_at: float = 0.0
+    completed_at: float = 0.0
+    result: Any = None
+    error: str = ""
+    retries: int = 0
+    max_retries: int = 3
+    approaches_tried: List[str] = field(default_factory=list)
+    children: List[Any] = field(default_factory=list)
+    parent_id: str = ""
+    tags: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+# ─── Knowledge Node ─────────────────────────────────────────────────────────────
+@dataclass
+class KnowledgeNode:
+    id: str
+    title: str
+    content: str
+    tags: List[str] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    access_count: int = 0
+    importance: float = 1.0
+    links: List[str] = field(default_factory=list)
+    source: str = "nexus"
+
+# ─── Skill ──────────────────────────────────────────────────────────────────────
+@dataclass
+class Skill:
+    name: str
+    description: str
+    code: str
+    trigger_keywords: List[str] = field(default_factory=list)
+    tests: str = ""
+    usage_count: int = 0
+    success_rate: float = 0.0
+    avg_duration: float = 0.0
+    created_at: float = field(default_factory=time.time)
+    last_used: float = field(default_factory=time.time)
+    version: int = 1
+    tags: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+# ─── Agent ─────────────────────────────────────────────────────────────────────
+@dataclass
+class Agent:
+    id: str
+    name: str
+    role: str
+    capabilities: List[str] = field(default_factory=list)
+    status: str = "idle"
+    tasks_completed: int = 0
+    avg_score: float = 0.0
+    created_at: float = field(default_factory=time.time)
+    current_task_id: str = ""
+
+# ─── Evolution Entry ────────────────────────────────────────────────────────────
+@dataclass
+class EvolutionEntry:
+    id: str
+    cycle: int
+    trigger: str
+    action_taken: str
+    result: str
+    layer2_analysis: str = ""
+    layer3_reflection: str = ""
+    before_state: Dict[str, Any] = field(default_factory=dict)
+    after_state: Dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+    quality_score: float = 0.0
+    improvement_delta: float = 0.0
+    methods_used: List[str] = field(default_factory=list)
+    bias_detected: bool = False
+
+# ─── Bias Report ───────────────────────────────────────────────────────────────
+@dataclass
+class BiasReport:
+    level: BiasLevel = BiasLevel.NONE
+    pct: float = 0.0
+    dominant_approach: str = ""
+    collapse_count: int = 0
+    action: str = "monitor"
+    alternatives: List[str] = field(default_factory=list)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# CONFIG
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class NEXUSConfig:
+    """NEXUS OS Configuration"""
+    twenty_base_url: str = ""
+    twenty_access_token: str = ""
+    twenty_api_key: str = ""
+    evolution_auto: bool = True
+    evolution_failure_threshold: int = 3
+    evolution_cycle_interval: int = 300
+    bias_threshold: float = 0.80
+    memory_hot_ttl: int = 300
+    memory_warm_ttl: int = 3600
+    memory_cold_ttl: int = 86400
+    max_archive_entries: int = 10000
+    log_level: str = "INFO"
+    
+    @classmethod
+    def load(cls) -> "NEXUSConfig":
+        if CONFIG_FILE.exists():
+            try:
+                data = json.loads(CONFIG_FILE.read_text())
+                return cls(**{k: v for k, v in data.items() if hasattr(cls, k)})
+            except Exception:
+                pass
+        return cls()
+    
+    def save(self):
+        data = {k: v for k, v in asdict(self).items()}
+        CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# ARCHIVE (STEPPING STONES)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class Archive:
+    """
+    NEXUS Archive — Every success/failure stored as reusable stepping stones.
+    Implements HyperAgents "Archive = Stepping Stones" principle.
+    """
+    
+    def __init__(self, config: NEXUSConfig):
+        self.config = config
+        self._lock = threading.Lock()
+        self._counter = self._load_counter()
+        self._cache: Dict[str, Any] = {}
+        self._cache_time = 0.0
+        self._cache_ttl = 10.0
+    
+    def _load_counter(self) -> int:
+        cf = ARCHIVE_DIR / "counter.txt"
+        return int(cf.read_text().strip()) if cf.exists() else 0
+    
+    def _save_counter(self, n: int):
+        (ARCHIVE_DIR / "counter.txt").write_text(str(n))
+    
+    def _cache_invalidated(self) -> bool:
+        return time.time() - self._cache_time > self._cache_ttl
+    
+    def _rebuild_cache(self):
+        """Rebuild pattern cache from archive files"""
+        successes = list(ARCHIVE_DIR.glob("success_*.json"))
+        failures = list(ARCHIVE_DIR.glob("failure_*.json"))
+        
+        task_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"success": 0, "failure": 0})
+        root_causes: Dict[str, int] = defaultdict(int)
+        approaches: Dict[str, int] = defaultdict(int)
+        total_successes = 0
+        total_failures = 0
+        
+        for f in successes:
+            try:
+                e = json.loads(f.read_text())
+                tn = e.get("task_name", "unknown")
+                task_stats[tn]["success"] += 1
+                approaches[e.get("approach", "default")] += 1
+                total_successes += 1
+            except: pass
+        
+        for f in failures:
+            try:
+                e = json.loads(f.read_text())
+                tn = e.get("task_name", "unknown")
+                task_stats[tn]["failure"] += 1
+                root_causes[e.get("root_cause", "unknown")] += 1
+                total_failures += 1
+            except: pass
+        
+        total = total_successes + total_failures
+        self._cache = {
+            "successes": total_successes,
+            "failures": total_failures,
+            "rate": total_successes / total if total else 0,
+            "task_stats": dict(task_stats),
+            "root_causes": dict(sorted(root_causes.items(), key=lambda x: x[1], reverse=True)),
+            "approaches": dict(sorted(approaches.items(), key=lambda x: x[1], reverse=True)),
+        }
+        self._cache_time = time.time()
+    
+    def get_patterns(self, use_cache: bool = True) -> Dict[str, Any]:
+        """Get archived patterns (with caching)"""
+        if not use_cache or self._cache_invalidated():
+            self._rebuild_cache()
+        return self._cache.copy()
+    
+    def log_success(self, task_name: str, approach: str, result: Any = None,
+                   duration: float = 0.0, metadata: Dict = None,
+                   lessons: List[str] = None) -> str:
+        with self._lock:
+            self._counter += 1
+            nid = f"success_{self._counter:05d}"
+            
+            result_str = str(result)[:500] if result is not None else ""
+            lessons = lessons or self._extract_lessons(approach, result_str)
+            
+            entry = {
+                "type": "success", "id": nid,
+                "task_name": task_name, "approach": approach,
+                "result_summary": result_str, "duration": duration,
+                "timestamp": time.time(), "metadata": metadata or {},
+                "lessons": lessons,
+            }
+            path = ARCHIVE_DIR / f"{nid}.json"
+            path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+            self._save_counter(self._counter)
+            self._cache_time = 0  # Invalidate cache
+            return nid
+    
+    def log_failure(self, task_name: str, approach: str, error: str = "",
+                   duration: float = 0.0, metadata: Dict = None) -> str:
+        with self._lock:
+            self._counter += 1
+            nid = f"failure_{self._counter:05d}"
+            
+            rc = self._diagnose_root_cause(error)
+            suggestions = self._suggest_next_approaches(approach, rc)
+            
+            entry = {
+                "type": "failure", "id": nid,
+                "task_name": task_name, "approach": approach,
+                "error_summary": error[:500], "duration": duration,
+                "timestamp": time.time(), "metadata": metadata or {},
+                "root_cause": rc, "next_approaches": suggestions,
+            }
+            path = ARCHIVE_DIR / f"{nid}.json"
+            path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+            self._save_counter(self._counter)
+            self._cache_time = 0
+            return nid
+    
+    def _extract_lessons(self, approach: str, result: str) -> List[str]:
+        lessons = []
+        al = (approach + " " + result).lower()
+        if "retry" in al: lessons.append("Retry with backoff effective")
+        if "parallel" in al or "concurrent" in al: lessons.append("Parallel execution helped")
+        if "decompose" in al or "step" in al: lessons.append("Task decomposition worked")
+        if "backup" in al or "restore" in al: lessons.append("Backup strategy safe")
+        if "cache" in al: lessons.append("Caching improved performance")
+        if "chunk" in al or "batch" in al: lessons.append("Chunking/batching effective")
+        if "validate" in al or "check" in al: lessons.append("Pre-validation prevented errors")
+        return lessons
+    
+    def _diagnose_root_cause(self, error: str) -> str:
+        e = error.lower()
+        if "permission" in e or "denied" in e or "access" in e: return "permission_issue"
+        if "not found" in e or "no such" in e: return "resource_missing"
+        if "timeout" in e: return "timeout"
+        if "memory" in e or "allocation" in e: return "memory_issue"
+        if "connection" in e or "network" in e: return "network_issue"
+        if "syntax" in e or "parse" in e: return "syntax_error"
+        if "import" in e or "module" in e: return "import_error"
+        if "encoding" in e or "decode" in e: return "encoding_error"
+        if "null" in e or "none" in e or "undefined" in e: return "null_reference"
+        if "value" in e and ("invalid" in e or "wrong" in e): return "invalid_input"
+        return "unknown"
+    
+    def _suggest_next_approaches(self, failed_approach: str, root_cause: str) -> List[str]:
+        suggestions = {
+            "permission_issue": ["Check permissions first", "Use alternative path", "Try sudo"],
+            "resource_missing": ["Pre-create resources", "Use fallback defaults", "Validate paths upfront"],
+            "timeout": ["Increase timeout value", "Chunk data processing", "Use streaming"],
+            "memory_issue": ["Stream/chunk data", "Use generators", "Reduce batch size"],
+            "network_issue": ["Add retry with backoff", "Check connectivity", "Use offline mode"],
+            "syntax_error": ["Validate syntax before exec", "Use linter", "Simplify expression"],
+            "import_error": ["Check dependencies", "Install missing modules", "Use alternative imports"],
+            "encoding_error": ["Specify encoding explicitly", "Try utf-8", "Detect encoding first"],
+            "null_reference": ["Add null checks", "Use optional/safe access", "Validate inputs"],
+            "invalid_input": ["Validate input types", "Add type hints", "Sanitize inputs"],
+        }
+        return suggestions.get(root_cause, ["Try different approach", "Break into smaller steps"])
+
+    def get_successes(self, task_name: str = None, limit: int = 20) -> List[Dict]:
+        entries = []
+        for f in sorted(ARCHIVE_DIR.glob("success_*.json"), key=lambda x: x.name, reverse=True):
+            try:
+                e = json.loads(f.read_text())
+                if task_name is None or task_name in e.get("task_name", ""):
+                    entries.append(e)
+            except: pass
+            if len(entries) >= limit: break
+        return entries
+
+    def get_failures(self, task_name: str = None, limit: int = 20) -> List[Dict]:
+        entries = []
+        for f in sorted(ARCHIVE_DIR.glob("failure_*.json"), key=lambda x: x.name, reverse=True):
+            try:
+                e = json.loads(f.read_text())
+                if task_name is None or task_name in e.get("task_name", ""):
+                    entries.append(e)
+            except: pass
+            if len(entries) >= limit: break
+        return entries
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE GRAPH
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class KnowledgeGraph:
+    """NEXUS Knowledge Graph — Connected knowledge with cross-references"""
+    
+    def __init__(self):
+        self._nodes: Dict[str, Dict] = {}
+        self._lock = threading.Lock()
+        self._index: Dict[str, Set[str]] = defaultdict(set)
+    
+    def add(self, title: str, content: str, tags: List[str] = None,
+            source: str = "nexus", links: List[str] = None,
+            importance: float = 1.0) -> Dict:
+        with self._lock:
+            nid = hashlib.md5(f"{title}{time.time()}{uuid.uuid4()}".encode()).hexdigest()[:12]
+            node = {
+                "id": nid, "title": title, "content": content,
+                "tags": tags or [], "source": source, "links": links or [],
+                "created_at": time.time(), "updated_at": time.time(),
+                "access_count": 0, "importance": importance,
+            }
+            self._nodes[nid] = node
+            for tag in (tags or []):
+                self._index[tag.lower()].add(nid)
+            return node
+    
+    def search(self, query: str, tags: List[str] = None, limit: int = 10) -> List[Dict]:
+        with self._lock:
+            ql = query.lower()
+            results = []
+            for node in self._nodes.values():
+                score = 0
+                if ql in node["title"].lower(): score += 3
+                if ql in node["content"].lower(): score += 1
+                if tags and any(t.lower() in node["tags"] for t in tags): score += 2
+                if score > 0:
+                    results.append((score, node))
+            return [n for _, n in sorted(results, reverse=True)[:limit]]
+    
+    def link(self, from_id: str, to_id: str):
+        with self._lock:
+            if from_id in self._nodes and to_id in self._nodes:
+                if to_id not in self._nodes[from_id]["links"]:
+                    self._nodes[from_id]["links"].append(to_id)
+    
+    def get_related(self, node_id: str, depth: int = 1) -> List[Dict]:
+        with self._lock:
+            if node_id not in self._nodes: return []
+            related, visited, queue = [], {node_id}, [node_id]
+            while queue and depth > 0:
+                curr = queue.pop(0)
+                for lid in self._nodes[curr]["links"]:
+                    if lid not in visited:
+                        visited.add(lid)
+                        related.append(self._nodes[lid])
+                        queue.append(lid)
+            return related
+    
+    def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            all_tags = set()
+            for n in self._nodes.values():
+                all_tags.update(n["tags"])
+            return {
+                "total_nodes": len(self._nodes),
+                "total_tags": len(all_tags),
+                "avg_links": sum(len(n["links"]) for n in self._nodes.values()) / max(len(self._nodes), 1),
+                "top_tags": dict(sorted({t: len(ids) for t, ids in self._index.items()}.items(),
+                                        key=lambda x: x[1], reverse=True)[:10]),
+            }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# ADAPTIVE ROUTER
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class AdaptiveRouter:
+    """Chooses best approach based on archive patterns"""
+    
+    def __init__(self, archive: Archive):
+        self.archive = archive
+        self._registry: Dict[str, List[Dict]] = defaultdict(list)
+        self._register_defaults()
+    
+    def _register_defaults(self):
+        defaults = [
+            ("create", "direct", "Immediate execution", 1),
+            ("create", "with_backup", "Backup before write", 2),
+            ("create", "incremental", "Step by step", 1),
+            ("fix", "diagnose_first", "Understand before fix", 2),
+            ("fix", "pattern_match", "Use known fix patterns", 1),
+            ("research", "deep_dive", "Comprehensive investigation", 2),
+            ("research", "quick_scan", "Fast initial scan", 1),
+            ("execute", "retry_3x", "Retry with backoff", 2),
+            ("verify", "automated", "Run automated tests", 2),
+            ("search", "cached", "Check cache first", 2),
+        ]
+        for task_type, approach, desc, priority in defaults:
+            self.register(task_type, approach, desc, priority)
+    
+    def register(self, task_type: str, approach: str, description: str, priority: int = 0):
+        self._registry[task_type].append({
+            "approach": approach, "description": description, "priority": priority
+        })
+        self._registry[task_type].sort(key=lambda x: x["priority"], reverse=True)
+    
+    def choose(self, task_name: str, context: Dict = None) -> str:
+        context = context or {}
+        patterns = self.archive.get_patterns()
+        successes = self.archive.get_successes(task_name)
+        failures = self.archive.get_failures(task_name)
+        task_type = self._infer_type(task_name)
+        
+        failed_approaches = {f.get("approach", "default") for f in failures}
+        successful_approaches = [s.get("approach") for s in successes if s.get("approach") not in failed_approaches]
+        
+        # Prefer successful approaches
+        if successful_approaches:
+            return successful_approaches[0]
+        
+        # Try from registry (prioritize untried)
+        if task_type in self._registry:
+            for reg in self._registry[task_type]:
+                ap = reg["approach"]
+                if ap not in failed_approaches:
+                    return ap
+        
+        return "direct"
+    
+    def _infer_type(self, name: str) -> str:
+        n = name.lower()
+        if any(k in n for k in ["write","create","build","make","generate","new"]): return "create"
+        if any(k in n for k in ["fix","bug","repair"]): return "fix"
+        if any(k in n for k in ["research","analyze","investigate","study"]): return "research"
+        if any(k in n for k in ["deploy","run","execute","start"]): return "execute"
+        if any(k in n for k in ["test","verify","check","validate"]): return "verify"
+        if any(k in n for k in ["search","find","lookup","query"]): return "search"
+        return "general"
+    
+    def get_alternatives(self, task_name: str, failed_approach: str) -> List[str]:
+        failures = self.archive.get_failures(task_name)
+        alts = set()
+        for f in failures:
+            if f.get("approach") == failed_approach:
+                alts.update(f.get("next_approaches", []))
+        return list(alts)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# SELF-HEALING ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class SelfHealing:
+    """Error detection, root cause analysis, and automatic recovery"""
+    
+    def __init__(self, archive: Archive):
+        self.archive = archive
+        self.healing_log: List[Dict] = []
+        self._strategies: Dict[str, List[Dict]] = defaultdict(list)
+        self._register_strategies()
+    
+    def _register_strategies(self):
+        # Register recovery strategies per root cause
+        self._strategies["permission_issue"] = [
+            {"name": "check_permissions", "action": "command", "cmd": "ls -la {path}", "description": "Check file permissions"},
+            {"name": "try_alt_path", "action": "suggest", "message": "Try alternative path (tilde expansion or relative)", "description": "Use tilde/relative path"},
+        ]
+        self._strategies["resource_missing"] = [
+            {"name": "create_dirs", "action": "auto", "cmd": "mkdir -p {dir}", "description": "Create missing directories"},
+            {"name": "use_default", "action": "suggest", "message": "Use default/fallback resource instead", "description": "Use fallback"},
+        ]
+        self._strategies["timeout"] = [
+            {"name": "increase_timeout", "action": "config", "key": "timeout_multiplier", "value": 2.0, "description": "Double timeout"},
+            {"name": "chunk_data", "action": "suggest", "message": "Break large data into chunks", "description": "Stream/chunk data"},
+        ]
+        self._strategies["network_issue"] = [
+            {"name": "retry_backoff", "action": "auto", "max_attempts": 3, "backoff": 2.0, "description": "Retry with exponential backoff"},
+            {"name": "check_connectivity", "action": "command", "cmd": "curl -s --max-time 5 https://example.com", "description": "Check network"},
+        ]
+        self._strategies["import_error"] = [
+            {"name": "install_deps", "action": "command", "cmd": "pip install {module}", "description": "Install missing dependency"},
+            {"name": "use_alt_import", "action": "suggest", "message": "Try alternative import method", "description": "Alternative import"},
+        ]
+        self._strategies["memory_issue"] = [
+            {"name": "stream_data", "action": "suggest", "message": "Use streaming/chunked processing", "description": "Stream data"},
+            {"name": "reduce_batch", "action": "config", "key": "batch_size", "value": 0.5, "description": "Reduce batch size by 50%"},
+        ]
+        # Default strategies for unknown errors
+        self._strategies["unknown"] = [
+            {"name": "manual_review", "action": "suggest", "message": "Manual review required", "description": "Needs human attention"},
+            {"name": "decompose", "action": "suggest", "message": "Break into smaller steps for diagnosis", "description": "Decompose task"},
+        ]
+    
+    def diagnose(self, error: str, context: Dict = None) -> Dict:
+        """Diagnose error and return root cause + recovery strategies"""
+        rc = self.archive._diagnose_root_cause(error)
+        strategies = self._strategies.get(rc, self._strategies["unknown"])
+        
+        diagnosis = {
+            "root_cause": rc,
+            "error_preview": error[:200],
+            "strategies": strategies,
+            "recommended": strategies[0] if strategies else None,
+            "context": context or {},
+        }
+        self.healing_log.append({**diagnosis, "timestamp": time.time()})
+        return diagnosis
+    
+    def apply_recovery(self, diagnosis: Dict) -> Optional[Dict]:
+        """Apply the recommended recovery strategy"""
+        recommended = diagnosis.get("recommended")
+        if not recommended:
+            return None
+        
+        action = recommended.get("action")
+        result = {"strategy": recommended["name"], "action": action}
+        
+        if action == "command":
+            cmd = recommended.get("cmd", "")
+            # Template substitution
+            ctx = diagnosis.get("context", {})
+            if ctx:
+                for k, v in ctx.items():
+                    cmd = cmd.replace(f"{{{k}}}", str(v))
+            try:
+                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                result["output"] = proc.stdout[:500]
+                result["success"] = proc.returncode == 0
+            except Exception as e:
+                result["output"] = str(e)
+                result["success"] = False
+        
+        elif action == "suggest":
+            result["message"] = recommended.get("message", "")
+            result["success"] = True  # Suggestions are always "successful"
+        
+        elif action == "config":
+            result["key"] = recommended.get("key", "")
+            result["value"] = recommended.get("value", "")
+            result["success"] = True
+        
+        return result
+    
+    def stats(self) -> Dict[str, Any]:
+        return {
+            "total_healings": len(self.healing_log),
+            "by_root_cause": dict(sorted(
+                {d.get("root_cause", "unknown"): sum(1 for h in self.healing_log if h.get("root_cause") == d.get("root_cause"))
+                 for d in self.healing_log}.items(),
+                key=lambda x: x[1], reverse=True
+            )),
+        }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# MULTI-AGENT FLEET
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class MultiAgentFleet:
+    """Parallel multi-agent orchestration with specialization"""
+    
+    def __init__(self):
+        self._agents: Dict[str, Dict] = {}
+        self._lock = threading.Lock()
+        self._score_history: Dict[str, List[float]] = defaultdict(list)
+        self._register_defaults()
+    
+    def _register_defaults(self):
+        defaults = [
+            ("code", "Code Agent", ["write_code","fix_bug","refactor","debug","implement"]),
+            ("research", "Research Agent", ["research","analyze","investigate","study","survey"]),
+            ("build", "Builder Agent", ["build","create","make","generate","deploy","setup"]),
+            ("debug", "Debug Agent", ["debug","fix","repair","diagnose","error","crash"]),
+            ("plan", "Planner Agent", ["plan","strategy","organize","coordinate","schedule"]),
+            ("evolve", "Evolution Agent", ["evolve","improve","optimize","enhance","refactor"]),
+        ]
+        for aid, name, caps in defaults:
+            self.register(Agent(
+                id=aid, name=name, role=aid, capabilities=caps,
+                created_at=time.time()
+            ))
+    
+    def register(self, agent: Agent):
+        with self._lock:
+            self._agents[agent.id] = asdict(agent)
+    
+    def select_best(self, task_description: str) -> Optional[Dict]:
+        d = task_description.lower()
+        best, best_score = None, 0
+        for agent in self._agents.values():
+            score = sum(1 for cap in agent["capabilities"] if cap in d)
+            if score > best_score:
+                best_score = score; best = agent
+        return best if best_score > 0 else self._agents.get("plan")
+    
+    def assign(self, agent_id: str, task_id: str):
+        with self._lock:
+            if agent_id in self._agents:
+                self._agents[agent_id]["status"] = "busy"
+                self._agents[agent_id]["current_task_id"] = task_id
+    
+    def complete(self, agent_id: str, score: float = 0.0):
+        with self._lock:
+            if agent_id in self._agents:
+                self._agents[agent_id]["status"] = "idle"
+                self._agents[agent_id]["current_task_id"] = ""
+                self._agents[agent_id]["tasks_completed"] += 1
+                self._score_history[agent_id].append(score)
+                if self._score_history[agent_id]:
+                    avg = sum(self._score_history[agent_id]) / len(self._score_history[agent_id])
+                    self._agents[agent_id]["avg_score"] = round(avg, 2)
+    
+    def status(self) -> Dict[str, Any]:
+        with self._lock:
+            agents_list = list(self._agents.values())
+            return {
+                "total": len(agents_list),
+                "idle": sum(1 for a in agents_list if a["status"] == "idle"),
+                "busy": sum(1 for a in agents_list if a["status"] == "busy"),
+                "agents": [
+                    {"id": a["id"], "name": a["name"], "role": a["role"],
+                     "status": a["status"], "tasks_completed": a["tasks_completed"],
+                     "avg_score": a["avg_score"]}
+                    for a in agents_list
+                ],
+            }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# SKILL FORGE
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class SkillForge:
+    """Dynamic skill creation, evolution, and lifecycle management"""
+    
+    def __init__(self, archive: Archive):
+        self.archive = archive
+        self._skills: Dict[str, Dict] = {}
+        self._lock = threading.Lock()
+        self._load()
+    
+    def _load(self):
+        for f in SKILLS_DIR.glob("*.json"):
+            try:
+                data = json.loads(f.read_text())
+                self._skills[data["name"]] = data
+            except: pass
+    
+    def _save(self, skill: Dict):
+        path = SKILLS_DIR / f"{skill['name']}.json"
+        path.write_text(json.dumps(skill, indent=2, ensure_ascii=False))
+    
+    def create(self, name: str, description: str, code: str,
+               trigger_keywords: List[str] = None,
+               tags: List[str] = None) -> Dict:
+        with self._lock:
+            skill = {
+                "name": name, "description": description, "code": code,
+                "trigger_keywords": trigger_keywords or [], "tests": "",
+                "usage_count": 0, "success_rate": 0.0, "avg_duration": 0.0,
+                "created_at": time.time(), "last_used": time.time(),
+                "version": 1, "tags": tags or [], "metadata": {},
+            }
+            self._skills[name] = skill
+            self._save(skill)
+            return skill
+    
+    def update(self, name: str, **kwargs) -> Optional[Dict]:
+        with self._lock:
+            if name not in self._skills: return None
+            skill = self._skills[name]
+            for k, v in kwargs.items():
+                if k in skill:
+                    skill[k] = v
+            skill["version"] += 1
+            skill["last_used"] = time.time()
+            self._save(skill)
+            return skill
+    
+    def record_usage(self, name: str, success: bool, duration: float):
+        with self._lock:
+            if name not in self._skills: return
+            s = self._skills[name]
+            total = s["usage_count"] + 1
+            current_successes = s["success_rate"] * s["usage_count"]
+            s["success_rate"] = (current_successes + (1 if success else 0)) / total
+            s["avg_duration"] = (s["avg_duration"] * s["usage_count"] + duration) / total
+            s["usage_count"] = total
+            s["last_used"] = time.time()
+            self._save(s)
+    
+    def find(self, query: str, limit: int = 5) -> List[Dict]:
+        with self._lock:
+            ql = query.lower()
+            results = []
+            for skill in self._skills.values():
+                score = 0
+                if ql in skill["name"].lower(): score += 3
+                if ql in skill["description"].lower(): score += 2
+                if any(ql in k.lower() for k in skill.get("trigger_keywords", [])): score += 5
+                if score > 0: results.append((score, skill))
+            return [s for _, s in sorted(results, reverse=True)[:limit]]
+    
+    def evolve(self, name: str, new_code: str) -> Optional[Dict]:
+        """Auto-evolve a skill based on usage patterns"""
+        with self._lock:
+            if name not in self._skills: return None
+            old = self._skills[name]
+            self.archive.log_success(f"skill_evolve_{name}", f"v{old['version']}",
+                                    f"evolved from {old['code'][:50]}...", old["avg_duration"])
+            return self.update(name, code=new_code)
+    
+    def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            if not self._skills:
+                return {"total": 0, "total_usages": 0, "avg_success_rate": 0.0}
+            return {
+                "total": len(self._skills),
+                "total_usages": sum(s["usage_count"] for s in self._skills.values()),
+                "avg_success_rate": sum(s["success_rate"] for s in self._skills.values()) / len(self._skills),
+                "top_skills": sorted(
+                    [(s["name"], s["usage_count"], round(s["success_rate"]*100, 1))
+                     for s in self._skills.values()],
+                    key=lambda x: x[1], reverse=True
+                )[:10],
+            }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# NEURAL MEMORY GRID
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class NeuralMemoryGrid:
+    """
+    3-tier memory: HOT (working) → WARM (recent) → COLD (archived).
+    Implements Atkinson-Shiffrin + fluid forgetting.
+    """
+    
+    def __init__(self, config: NEXUSConfig):
+        self.config = config
+        self._hot: Dict[str, Dict] = {}
+        self._warm: Dict[str, Dict] = {}
+        self._cold: Dict[str, Dict] = {}
+        self._priority: Dict[str, float] = defaultdict(float)
+        self._lock = threading.Lock()
+        self._session_id = str(uuid.uuid4())[:8]
+    
+    def store(self, key: str, value: Any, priority: float = 1.0, tier: str = "hot"):
+        with self._lock:
+            entry = {"value": value, "priority": priority, "timestamp": time.time(),
+                     "access_count": 0, "session": self._session_id}
+            if tier == "hot": self._hot[key] = entry
+            elif tier == "warm": self._warm[key] = entry
+            else: self._cold[key] = entry
+            self._priority[key] = priority
+    
+    def retrieve(self, key: str) -> Optional[Any]:
+        with self._lock:
+            for tier, mem in [("hot", self._hot), ("warm", self._warm), ("cold", self._cold)]:
+                if key in mem:
+                    mem[key]["access_count"] += 1
+                    self._priority[key] = min(1.0, self._priority.get(key, 0) + 0.05)
+                    if mem[key]["access_count"] > 5 and tier == "hot":
+                        self._warm[key] = self._hot.pop(key)
+                    return mem[key]["value"]
+        return None
+    
+    def search(self, query: str, tier: str = "all") -> List[tuple]:
+        with self._lock:
+            memories = []
+            if tier in ("hot","all"): memories += list(self._hot.items())
+            if tier in ("warm","all"): memories += list(self._warm.items())
+            if tier in ("cold","all"): memories += list(self._cold.items())
+            ql = query.lower()
+            return sorted(
+                [(k, v["value"], self._priority.get(k, 0))
+                 for k, v in memories if ql in str(v["value"]).lower() or ql in k.lower()],
+                key=lambda x: x[2], reverse=True
+            )
+    
+    def compress(self) -> Dict[str, int]:
+        """Fluid forgetting — promote/demote based on age and priority"""
+        with self._lock:
+            now = time.time()
+            p, d, disc = 0, 0, 0
+            
+            for k in list(self._hot.keys()):
+                age = now - self._hot[k]["timestamp"]
+                if age > self.config.memory_hot_ttl and self._priority.get(k, 0) < 0.7:
+                    self._warm[k] = self._hot.pop(k); p += 1
+            
+            for k in list(self._warm.keys()):
+                age = now - self._warm[k]["timestamp"]
+                if age > self.config.memory_warm_ttl:
+                    self._cold[k] = self._warm.pop(k); d += 1
+            
+            for k in list(self._cold.keys()):
+                age = now - self._cold[k]["timestamp"]
+                if age > self.config.memory_cold_ttl and self._priority.get(k, 0) < 0.3:
+                    self._cold.pop(k); disc += 1
+            
+            return {"promoted": p, "demoted": d, "discarded": disc,
+                   "hot": len(self._hot), "warm": len(self._warm), "cold": len(self._cold)}
+    
+    def get_context(self, max_items: int = 20) -> str:
+        with self._lock:
+            items = [(k, v, self._priority.get(k, 0)) for k, v in
+                     list(self._hot.items()) + list(self._warm.items())]
+            return "\n".join(f"[{k}] {str(v['value'])[:80]}"
+                           for k, v, _ in sorted(items, key=lambda x: x[2], reverse=True)[:max_items])
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# AUTONOMOUS CODING AGENT
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class AutonomousCodingAgent:
+    """Self-contained code generation, execution, and testing agent"""
+    
+    # Code templates for common patterns
+    TEMPLATES = {
+        "web_scraper": {
+            "file": "scraper.py",
+            "template": '''#!/usr/bin/env python3
+"""Web Scraper — Generated by NEXUS OS"""
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+import json
+from datetime import datetime
+
+HEADERS = {{"User-Agent": "Mozilla/5.0 (compatible; NEXUS-Bot/1.0)"}}
+
+class WebScraper:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.session = requests.Session()
+        self.session.headers.update(HEADERS)
+        self.results = {{}}
+    
+    def fetch(self, url: str) -> str:
+        try:
+            r = self.session.get(url, timeout=10)
+            r.raise_for_status()
+            return r.text
+        except Exception as e:
+            return f"Error: {{e}}"
+    
+    def scrape_headlines(self, url: str) -> list:
+        html = self.fetch(url)
+        if html.startswith("Error"):
+            return [html]
+        soup = BeautifulSoup(html, "html.parser")
+        headlines = [h.get_text(strip=True) for h in soup.find_all(["h1","h2","h3"])[:20]]
+        return headlines or ["No headlines found"]
+    
+    def run(self, urls: list):
+        for url in urls:
+            print(f"Scraping: {{url}}")
+            headlines = self.scrape_headlines(url)
+            self.results[url] = headlines
+        return self.results
+
+if __name__ == "__main__":
+    urls = ["https://news.ycombinator.com/", "https://reddit.com/r/programming"]
+    scraper = WebScraper("")
+    results = scraper.run(urls)
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+''',
+        },
+        "rest_api": {
+            "file": "api_server.py",
+            "template": '''#!/usr/bin/env python3
+"""REST API Server — Generated by NEXUS OS"""
+from flask import Flask, jsonify, request
+from functools import wraps
+import time
+
+app = Flask(__name__)
+
+# Health check
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({{"status": "healthy", "timestamp": time.time()}})
+
+# Example endpoints
+@app.route("/api/items", methods=["GET"])
+def get_items():
+    return jsonify({{"items": [], "count": 0}})
+
+@app.route("/api/items", methods=["POST"])
+def create_item():
+    data = request.get_json() or {{}}
+    return jsonify({{"id": 1, "created": True, "data": data}}), 201
+
+@app.route("/api/items/<int:item_id>", methods=["GET"])
+def get_item(item_id):
+    return jsonify({{"id": item_id, "name": "item"}})
+
+@app.route("/api/items/<int:item_id>", methods=["PUT"])
+def update_item(item_id):
+    data = request.get_json() or {{}}
+    return jsonify({{"id": item_id, "updated": True, **data}})
+
+@app.route("/api/items/<int:item_id>", methods=["DELETE"])
+def delete_item(item_id):
+    return jsonify({{"id": item_id, "deleted": True}})
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({{"error": "Not found"}}), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({{"error": "Internal server error"}}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+''',
+        },
+        "cli_tool": {
+            "file": "cli_tool.py",
+            "template": '''#!/usr/bin/env python3
+"""CLI Tool — Generated by NEXUS OS"""
+import argparse
+import sys
+from pathlib import Path
+
+def main():
+    parser = argparse.ArgumentParser(description="NEXUS CLI Tool")
+    parser.add_argument("command", choices=["run","status","check"], help="Command to execute")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    args = parser.parse_args()
+    
+    if args.command == "run":
+        print("Running...")
+    elif args.command == "status":
+        print("Status: OK")
+    elif args.command == "check":
+        print("All checks passed")
+    
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+''',
+        },
+        "data_processor": {
+            "file": "processor.py",
+            "template": '''#!/usr/bin/env python3
+"""Data Processor — Generated by NEXUS OS"""
+import json
+import csv
+from pathlib import Path
+from typing import Any, Iterator
+
+class DataProcessor:
+    def __init__(self, input_path: str, output_path: str):
+        self.input_path = Path(input_path)
+        self.output_path = Path(output_path)
+    
+    def process_json(self) -> list:
+        data = json.loads(self.input_path.read_text())
+        return data
+    
+    def process_csv(self) -> list:
+        rows = []
+        with open(self.input_path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(row)
+        return rows
+    
+    def save(self, data: list):
+        self.output_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        print(f"Saved {{len(data)}} records to {{self.output_path}}")
+
+if __name__ == "__main__":
+    proc = DataProcessor("input.json", "output.json")
+    result = proc.process_json()
+    proc.save(result)
+''',
+        },
+    }
+    
+    def __init__(self, archive: Archive, skill_forge: SkillForge):
+        self.archive = archive
+        self.skill_forge = skill_forge
+        self.workspace = WORKSPACE_DIR
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.executions = 0
+        self.successes = 0
+    
+    def generate(self, description: str) -> Dict[str, Any]:
+        """Generate code from natural language description"""
+        desc_lower = description.lower()
+        template_key = "cli_tool"
+        
+        if any(k in desc_lower for k in ["scrap", "scrape", "crawl", "extract", "headline"]):
+            template_key = "web_scraper"
+        elif any(k in desc_lower for k in ["api", "rest", "server", "endpoint", "http"]):
+            template_key = "rest_api"
+        elif any(k in desc_lower for k in ["process", "data", "csv", "json", "etl", "transform"]):
+            template_key = "data_processor"
+        
+        template = self.TEMPLATES.get(template_key, self.TEMPLATES["cli_tool"])
+        filename = template["file"]
+        
+        # Create project directory
+        project_name = re.sub(r"[^a-z0-9_]", "_", description[:30].lower())
+        project_dir = self.workspace / project_name
+        project_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Write the main file
+        code = template["template"].replace("{{", "{").replace("}}", "}")
+        main_file = project_dir / filename
+        main_file.write_text(code)
+        
+        # Create requirements.txt if needed
+        reqs = project_dir / "requirements.txt"
+        reqs.write_text("requests\nbeautifulsoup4\nflask\n")
+        
+        # Create README
+        readme = project_dir / "README.md"
+        readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
+        
+        self.executions += 1
+        
+        return {
+            "project_name": project_name,
+            "project_dir": str(project_dir),
+            "files": [str(f.name) for f in project_dir.iterdir()],
+            "template_used": template_key,
+            "description": description,
+        }
+    
+    def execute(self, project_dir: str, filename: str = None) -> Dict[str, Any]:
+        """Execute generated code and return results"""
+        project_path = Path(project_dir)
+        if not project_path.exists():
+            return {"success": False, "error": f"Project not found: {project_dir}"}
+        
+        # Find the main file
+        if filename:
+            main_file = project_path / filename
+        else:
+            for ext in ["*.py", "*.sh"]:
+                matches = list(project_path.glob(ext))
+                if matches:
+                    main_file = matches[0]
+                    break
+            else:
+                return {"success": False, "error": "No executable found"}
+        
+        if main_file.suffix == ".py":
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(main_file)],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=str(project_path)
+                )
+                return {
+                    "success": result.returncode == 0,
+                    "stdout": result.stdout[:500],
+                    "stderr": result.stderr[:500] if result.stderr else "",
+                    "returncode": result.returncode,
+                }
+            except subprocess.TimeoutExpired:
+                return {"success": False, "error": "Execution timeout (30s)"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        else:
+            return {"success": False, "error": f"Unsupported file type: {main_file.suffix}"}
+    
+    def stats(self) -> Dict[str, Any]:
+        return {
+            "executions": self.executions,
+            "successes": self.successes,
+            "success_rate": self.successes / self.executions if self.executions else 0,
+            "workspace": str(self.workspace),
+        }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# TWENTY CRM CLIENT
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class TwentyCRM:
+    """Twenty CRM API Client — Tasks, activities, and pipeline management"""
+    
+    def __init__(self, config: NEXUSConfig):
+        self.config = config
+        self.base_url = config.twenty_base_url.rstrip("/")
+        self.token = config.twenty_access_token or config.twenty_api_key
+        self.mode = "live" if (self.base_url and self.token) else "mock"
+        self._mock_data: Dict[str, Any] = {"tasks": {}, "activities": []}
+    
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+    
+    def create_task(self, title: str, description: str = "", status: str = "TODO",
+                   priority: str = "MEDIUM") -> Dict:
+        """Create a task in Twenty CRM"""
+        if self.mode == "mock":
+            task_id = f"mock_{uuid.uuid4().hex[:8]}"
+            self._mock_data["tasks"][task_id] = {
+                "id": task_id, "title": title, "description": description,
+                "status": status, "priority": priority, "created_at": datetime.now().isoformat(),
+            }
+            return self._mock_data["tasks"][task_id]
+        
+        try:
+            resp = subprocess.run(
+                ["curl", "-s", "-X", "POST",
+                 f"{self.base_url}/api/rest/tasks",
+                 "-H", f"Bearer: {self.token}",
+                 "-H", "Content-Type: application/json",
+                 "-d", json.dumps({"title": title, "description": description})],
+                capture_output=True, text=True, timeout=10
+            )
+            return json.loads(resp.stdout) if resp.stdout else {}
+        except Exception:
+            return {"id": "error", "title": title}
+    
+    def get_tasks(self, status: str = None, limit: int = 50) -> List[Dict]:
+        """Get tasks from Twenty CRM"""
+        if self.mode == "mock":
+            tasks = list(self._mock_data["tasks"].values())
+            if status:
+                tasks = [t for t in tasks if t.get("status") == status]
+            return tasks[:limit]
+        
+        try:
+            resp = subprocess.run(
+                ["curl", "-s", "-G", f"{self.base_url}/api/rest/tasks",
+                 "--data-urlencode", f"limit={limit}",
+                 "-H", f"Bearer: {self.token}"],
+                capture_output=True, text=True, timeout=10
+            )
+            data = json.loads(resp.stdout) if resp.stdout else {}
+            return data.get("data", [])
+        except Exception:
+            return []
+    
+    def log_activity(self, task_id: str, action: str, description: str = "") -> Dict:
+        """Log an activity against a task"""
+        activity = {
+            "id": f"act_{uuid.uuid4().hex[:8]}",
+            "task_id": task_id, "action": action, "description": description,
+            "timestamp": datetime.now().isoformat(),
+        }
+        if self.mode == "mock":
+            self._mock_data["activities"].append(activity)
+            return activity
+        
+        try:
+            resp = subprocess.run(
+                ["curl", "-s", "-X", "POST",
+                 f"{self.base_url}/api/rest/activities",
+                 "-H", f"Bearer: {self.token}",
+                 "-H", "Content-Type: application/json",
+                 "-d", json.dumps(activity)],
+                capture_output=True, text=True, timeout=10
+            )
+            return json.loads(resp.stdout) if resp.stdout else {}
+        except Exception:
+            return activity
+    
+    def get_activities(self, task_id: str = None, limit: int = 20) -> List[Dict]:
+        """Get activities from Twenty CRM"""
+        if self.mode == "mock":
+            acts = self._mock_data["activities"]
+            if task_id:
+                acts = [a for a in acts if a.get("task_id") == task_id]
+            return acts[:limit]
+        
+        try:
+            resp = subprocess.run(
+                ["curl", "-s", f"{self.base_url}/api/rest/activities?limit={limit}",
+                 "-H", f"Bearer: {self.token}"],
+                capture_output=True, text=True, timeout=10
+            )
+            data = json.loads(resp.stdout) if resp.stdout else {}
+            return data.get("data", [])
+        except Exception:
+            return []
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get CRM metrics dashboard"""
+        if self.mode == "mock":
+            tasks = list(self._mock_data["tasks"].values())
+            return {
+                "total_tasks": len(tasks),
+                "by_status": {s: sum(1 for t in tasks if t.get("status") == s) for s in ["TODO","IN_PROGRESS","DONE"]},
+                "activities": len(self._mock_data["activities"]),
+            }
+        
+        return {"total_tasks": 0, "by_status": {}, "activities": 0, "mode": "live"}
+    
+    def status(self) -> Dict[str, Any]:
+        return {"mode": self.mode, "base_url": self.base_url or "not configured"}
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# META-META LAYER (HYPERAGENTS LAYER 3)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class MetaMetaLayer:
+    """
+    HyperAgents Layer 3 — Questions whether the improvement METHOD itself is optimal.
+    
+    Layer 1 (Task): Executes current work
+    Layer 2 (Meta): Analyzes results to find improvements  
+    Layer 3 (Meta-Meta): Questions if the improvement approach is optimal
+    """
+    
+    def __init__(self, archive: Archive, knowledge: KnowledgeGraph, config: NEXUSConfig):
+        self.archive = archive
+        self.knowledge = knowledge
+        self.config = config
+        self._reflection_count = 0
+        self._method_history: Dict[str, float] = defaultdict(float)  # method → score
+        self._bias_threshold = config.bias_threshold
+    
+    def reflect(self, patterns: Dict = None) -> Dict[str, Any]:
+        """Perform Layer 3 reflection — are we improving optimally?"""
+        self._reflection_count += 1
+        patterns = patterns or self.archive.get_patterns()
+        
+        # Layer 3 analysis
+        bias = self._analyze_bias(patterns)
+        cross_domain = self._check_cross_domain(patterns)
+        acceleration = self._check_self_acceleration()
+        method_scores = self._score_methods(patterns)
+        
+        # Determine next best method
+        next_method = self._select_next_method(method_scores, bias)
+        
+        # Generate recommendations
+        recommendations = self._generate_recommendations(bias, cross_domain, acceleration, patterns)
+        
+        reflection = {
+            "layer": 3,
+            "reflection_id": self._reflection_count,
+            "timestamp": time.time(),
+            "question": "Is our METHOD of improvement optimal?",
+            "bias_assessment": asdict(bias),
+            "cross_domain_transfer": cross_domain,
+            "self_acceleration": acceleration,
+            "method_scores": method_scores,
+            "selected_method": next_method,
+            "recommendations": recommendations,
+        }
+        
+        # Add to knowledge graph
+        self.knowledge.add(
+            title=f"Meta-Meta Reflection #{self._reflection_count}",
+            content=f"Q: {reflection['question']} | Bias: {bias.level.name} | Method: {next_method} | "
+                    f"Recs: {'; '.join(recommendations[:3])}",
+            tags=["meta-meta", "reflection", "hyperagents", bias.level.name.lower()],
+            source="meta-meta-layer",
+            importance=0.8,
+        )
+        
+        return reflection
+    
+    def _analyze_bias(self, patterns: Dict) -> BiasReport:
+        """Detect bias collapse (80%+ approach dominance)"""
+        approaches = patterns.get("approaches", {})
+        if not approaches:
+            return BiasReport()
+        
+        total = sum(approaches.values())
+        if total == 0:
+            return BiasReport()
+        
+        max_count = max(approaches.values())
+        max_approach = max(approaches, key=approaches.get)
+        pct = max_count / total
+        
+        if pct >= 0.95: level = BiasLevel.COLLAPSED
+        elif pct >= 0.80: level = BiasLevel.SEVERE
+        elif pct >= 0.70: level = BiasLevel.MODERATE
+        elif pct >= 0.50: level = BiasLevel.MILD
+        else: level = BiasLevel.NONE
+        
+        # Get failed approaches as alternatives
+        failures = self.archive.get_failures(limit=50)
+        alternatives = list(set(f.get("approach") for f in failures if f.get("approach") != max_approach))[:5]
+        
+        return BiasReport(
+            level=level,
+            pct=pct,
+            dominant_approach=max_approach,
+            collapse_count=max_count,
+            action="force_alternatives" if level.value >= BiasLevel.SEVERE.value else "monitor",
+            alternatives=alternatives,
+        )
+    
+    def _check_cross_domain(self, patterns: Dict) -> Dict[str, Any]:
+        """Check if insights from one domain can help another"""
+        task_stats = patterns.get("task_stats", {})
+        if len(task_stats) < 2:
+            return {"available": False, "message": "Not enough domains to transfer knowledge"}
+        
+        # Count successful approaches per task
+        domain_successes = {}
+        for task, stats in task_stats.items():
+            if stats.get("success", 0) > 0:
+                successes = self.archive.get_successes(task, limit=5)
+                approaches = [s.get("approach") for s in successes]
+                domain_successes[task] = approaches
+        
+        opportunities = 0
+        for task_a, ap_a in domain_successes.items():
+            for task_b, ap_b in domain_successes.items():
+                if task_a != task_b and set(ap_a) & set(ap_b):
+                    opportunities += 1
+        
+        return {
+            "available": opportunities > 0,
+            "opportunities": opportunities,
+            "domains": list(domain_successes.keys()),
+            "message": f"Found {opportunities} cross-domain transfer opportunities"
+        }
+    
+    def _check_self_acceleration(self) -> Dict[str, Any]:
+        """Are we improving at a faster rate over time?"""
+        evo_files = sorted(ARCHIVE_DIR.glob("evolution/cycle_*.json"))
+        if len(evo_files) < 3:
+            return {"detected": False, "message": "Not enough evolution cycles to measure"}
+        
+        try:
+            entries = [json.loads(f.read_text()) for f in evo_files[-6:] if f.exists()]
+            if len(entries) < 3:
+                return {"detected": False, "message": "Insufficient evolution data"}
+            
+            recent = [e.get("quality_score", 0) for e in entries[-3:]]
+            older = [e.get("quality_score", 0) for e in entries[:-3]] if len(entries) > 3 else [0]
+            
+            if older and older[0] > 0:
+                avg_recent = sum(recent) / len(recent)
+                avg_older = sum(older) / len(older)
+                delta = (avg_recent - avg_older) / avg_older if avg_older else 0
+                return {
+                    "detected": delta > 0.1,
+                    "improvement_rate": delta,
+                    "message": f"Accelerating at {delta*100:.1f}%" if delta > 0 else "No acceleration detected",
+                }
+        except Exception:
+            pass
+        
+        return {"detected": False, "message": "Cannot measure acceleration"}
+    
+    def _score_methods(self, patterns: Dict) -> Dict[str, float]:
+        """Score each improvement method based on recent performance"""
+        successes = self.archive.get_successes(limit=50)
+        failures = self.archive.get_failures(limit=50)
+        
+        scores = {m: 0.0 for m in IMPROVEMENT_METHODS}
+        total_weight = 0
+        
+        # Score archive_based
+        archive_score = len([s for s in successes]) / max(len(successes) + len(failures), 1)
+        scores["archive_based"] = archive_score
+        if archive_score > 0: total_weight += 1
+        
+        # Score based on convergence
+        approaches = patterns.get("approaches", {})
+        if approaches:
+            entropy = -sum((c/sum(approaches.values())) * (c/sum(approaches.values()))
+                          for c in approaches.values() if c > 0)
+            max_entropy = -((len(approaches)/sum(approaches.values())) * (1/len(approaches)) * len(approaches)) if approaches else 1
+            normalized_entropy = entropy / max_entropy if max_entropy else 0
+            scores["random_exploration"] = (1 - normalized_entropy) * 0.5
+        
+        # Score based on knowledge
+        knowledge_stats = self.knowledge.stats()
+        scores["knowledge_based"] = min(1.0, knowledge_stats["total_nodes"] / 20)
+        
+        # Analogy transfer
+        cross = self._check_cross_domain(patterns)
+        scores["analogy_transfer"] = 0.3 if cross.get("available") else 0.0
+        
+        # Meta learning
+        scores["meta_learning"] = self._reflection_count / 10
+        
+        return scores
+    
+    def _select_next_method(self, scores: Dict[str, float], bias: BiasReport) -> str:
+        """Select the best improvement method for next cycle"""
+        if bias.action == "force_alternatives":
+            return "random_exploration"
+        
+        # Find highest scoring method
+        best = max(scores, key=scores.get)
+        return best if scores.get(best, 0) > 0 else "archive_based"
+    
+    def _generate_recommendations(self, bias: BiasReport, cross_domain: Dict,
+                                  acceleration: Dict, patterns: Dict) -> List[str]:
+        """Generate Layer 3 recommendations"""
+        recs = []
+        
+        if bias.action == "force_alternatives":
+            recs.append(f"CRITICAL: Bias to '{bias.dominant_approach}' at {bias.pct*100:.0f}% — force untried approaches")
+        
+        if cross_domain.get("available"):
+            recs.append(f"CROSS-DOMAIN: {cross_domain['opportunities']} transfer opportunities found")
+        
+        if acceleration.get("detected"):
+            recs.append(f"ACCELERATION: Improving at {acceleration['improvement_rate']*100:.1f}%")
+        
+        root_causes = patterns.get("root_causes", {})
+        if root_causes:
+            top_rc = max(root_causes, key=root_causes.get)
+            count = root_causes[top_rc]
+            if count >= 3:
+                recs.append(f"PERSISTENT: '{top_rc}' occurred {count}x — needs fundamental fix")
+        
+        task_stats = patterns.get("task_stats", {})
+        failing_tasks = [t for t, s in task_stats.items() if s.get("failure", 0) > 3]
+        if failing_tasks:
+            recs.append(f"REVIEW: {len(failing_tasks)} tasks failing repeatedly — redesign needed")
+        
+        if not recs:
+            recs.append("HEALTHY: System improvement method is optimal — maintain course")
+        
+        return recs
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# EVOLUTION ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class EvolutionEngine:
+    """Auto-evolution based on accumulated experience"""
+    
+    def __init__(self, archive: Archive, knowledge: KnowledgeGraph, config: NEXUSConfig):
+        self.archive = archive
+        self.knowledge = knowledge
+        self.config = config
+        self.cycle = self._load_cycle()
+        self._last_cycle_time = 0.0
+        self._consecutive_failures = 0
+        self._total_improvements = 0
+    
+    def _load_cycle(self) -> int:
+        cf = ARCHIVE_DIR / "evolution_cycle.txt"
+        return int(cf.read_text().strip()) if cf.exists() else 0
+    
+    def _save_cycle(self, n: int):
+        (ARCHIVE_DIR / "evolution_cycle.txt").write_text(str(n))
+    
+    def should_evolve(self) -> bool:
+        """Check if evolution should trigger"""
+        patterns = self.archive.get_patterns()
+        
+        # Check failure threshold
+        if patterns["failures"] >= self.config.evolution_failure_threshold:
+            return True
+        
+        # Check time interval
+        if time.time() - self._last_cycle_time < self.config.evolution_cycle_interval:
+            return False
+        
+        # Check for bias
+        approaches = patterns.get("approaches", {})
+        if approaches:
+            total = sum(approaches.values())
+            if total > 0 and max(approaches.values()) / total >= self.config.bias_threshold:
+                return True
+        
+        # Check for new entries
+        if patterns["successes"] + patterns["failures"] >= 10:
+            return True
+        
+        return False
+    
+    def evolve(self, manual: bool = False) -> Optional[EvolutionEntry]:
+        """Execute one evolution cycle"""
+        self.cycle += 1
+        self._last_cycle_time = time.time()
+        
+        patterns = self.archive.get_patterns()
+        before_state = {
+            "success_rate": patterns.get("rate", 0),
+            "total_failures": patterns.get("failures", 0),
+            "total_successes": patterns.get("successes", 0),
+            "cycles": self.cycle - 1,
+        }
+        
+        actions = []
+        layer2_analysis = ""
+        layer3_reflection = ""
+        quality_score = 0.0
+        bias_detected = False
+        methods_used = []
+        
+        # Layer 2: Analyze recent patterns
+        failures = self.archive.get_failures(limit=20)
+        if failures:
+            rc_counts = defaultdict(int)
+            for f in failures:
+                rc_counts[f.get("root_cause", "unknown")] += 1
+            top_rc = max(rc_counts, key=rc_counts.get)
+            layer2_analysis = f"Top failure: '{top_rc}' ({rc_counts[top_rc]}x)"
+            
+            if rc_counts[top_rc] >= 3:
+                actions.append(f"FIX: Address root cause '{top_rc}' — add preventive check")
+                methods_used.append("archive_based")
+                self.knowledge.add(
+                    title=f"Root Cause: {top_rc}",
+                    content=f"'{top_rc}' detected {rc_counts[top_rc]} times. Preventive measures needed.",
+                    tags=["root_cause", top_rc, "actionable"],
+                    source="evolution-layer2",
+                    importance=0.9,
+                )
+        
+        # Layer 3: Check for bias
+        approaches = patterns.get("approaches", {})
+        if approaches:
+            total = sum(approaches.values())
+            max_count = max(approaches.values())
+            max_approach = max(approaches, key=approaches.get)
+            pct = max_count / total if total > 0 else 0
+            
+            if pct >= self.config.bias_threshold:
+                bias_detected = True
+                layer3_reflection = f"Bias: '{max_approach}' used {pct*100:.0f}% — forcing alternatives"
+                actions.append(f"BIAS_BREAK: Force approach diversity, stop over-relying on '{max_approach}'")
+                methods_used.append("random_exploration")
+                self.knowledge.add(
+                    title=f"Bias Detected: {max_approach}",
+                    content=f"Approach '{max_approach}' at {pct*100:.0f}% dominance. Need diversity.",
+                    tags=["bias", "diversity", max_approach],
+                    source="evolution-layer3",
+                    importance=1.0,
+                )
+        
+        # General improvement actions
+        task_stats = patterns.get("task_stats", {})
+        for task, stats in task_stats.items():
+            if stats.get("failure", 0) > 3:
+                actions.append(f"REVIEW: Task '{task}' failing {stats['failure']}x — needs redesign")
+                methods_used.append("analogy_transfer")
+        
+        if not actions:
+            actions.append("NO_ISSUES: System is healthy")
+            quality_score = 1.0
+        else:
+            quality_score = min(1.0, len([a for a in actions if "NO_ISSUES" not in a]) / 3)
+        
+        self._total_improvements += len(actions)
+        
+        after_state = {
+            "success_rate": patterns.get("rate", 0),
+            "cycles_completed": self.cycle,
+            "improvements_made": len(actions),
+            "total_improvements": self._total_improvements,
+        }
+        
+        entry = EvolutionEntry(
+            id=f"evo_{self.cycle:05d}",
+            cycle=self.cycle,
+            trigger=f"auto:failures={patterns['failures']}" if not manual else "manual",
+            action_taken=" | ".join(actions),
+            result="completed",
+            layer2_analysis=layer2_analysis,
+            layer3_reflection=layer3_reflection,
+            before_state=before_state,
+            after_state=after_state,
+            timestamp=time.time(),
+            quality_score=quality_score,
+            improvement_delta=after_state["success_rate"] - before_state["success_rate"],
+            methods_used=methods_used,
+            bias_detected=bias_detected,
+        )
+        
+        self._save_cycle(self.cycle)
+        self._save_entry(entry)
+        
+        return entry
+    
+    def _save_entry(self, entry: EvolutionEntry):
+        evo_dir = ARCHIVE_DIR / "evolution"
+        evo_dir.mkdir(parents=True, exist_ok=True)
+        path = evo_dir / f"cycle_{entry.cycle:05d}.json"
+        path.write_text(json.dumps(asdict(entry), indent=2, ensure_ascii=False))
+    
+    def stats(self) -> Dict[str, Any]:
+        evo_dir = ARCHIVE_DIR / "evolution"
+        cycles = sorted(evo_dir.glob("cycle_*.json"))
+        entries = []
+        for f in cycles:
+            try:
+                entries.append(json.loads(f.read_text()))
+            except: pass
+        
+        if not entries:
+            return {"cycles": 0, "avg_quality": 0, "bias_detections": 0, "improvements": 0}
+        
+        return {
+            "cycles": len(entries),
+            "avg_quality": sum(e.get("quality_score", 0) for e in entries) / len(entries),
+            "bias_detections": sum(1 for e in entries if e.get("bias_detected")),
+            "improvements": sum(1 for e in entries if "NO_ISSUES" not in e.get("action_taken", "")),
+            "recent": entries[-3:],
+        }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# NEXUS CORE
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class NEXUSCore:
+    """
+    NEXUS OS Core — Unified autonomous AI operating system.
+    Orchestrates all 8 layers into one coherent engine.
+    """
+    
+    def __init__(self, config: NEXUSConfig = None):
+        self.version = VERSION
+        self.started_at = time.time()
+        self.config = config or NEXUSConfig.load()
+        self.session_id = str(uuid.uuid4())[:8]
+        
+        # Initialize all subsystems
+        self.archive = Archive(self.config)
+        self.knowledge = KnowledgeGraph()
+        self.router = AdaptiveRouter(self.archive)
+        self.healing = SelfHealing(self.archive)
+        self.fleet = MultiAgentFleet()
+        self.skill_forge = SkillForge(self.archive)
+        self.memory = NeuralMemoryGrid(self.config)
+        self.crm = TwentyCRM(self.config)
+        self.coding = AutonomousCodingAgent(self.archive, self.skill_forge)
+        self.evolution = EvolutionEngine(self.archive, self.knowledge, self.config)
+        self.meta_meta = MetaMetaLayer(self.archive, self.knowledge, self.config)
+        
+        # State
+        self._evolution_enabled = True
+        self._task_count = 0
+        self._consecutive_failures = 0
+        
+        # Seed foundational knowledge
+        self._seed_knowledge()
+    
+    def _seed_knowledge(self):
+        """Seed foundational knowledge for bootstrapping"""
+        seeds = [
+            ("NEXUS OS Architecture", "8-layer autonomous AI OS", ["nexus","architecture","core"], 1.0),
+            ("HyperAgents 3-Layer", "Task→Meta→Meta-Meta for self-improvement", ["hyperagents","meta","layer3"], 1.0),
+            ("Stepping Stones Archive", "Every success/failure as reusable experience", ["archive","learning","pattern"], 0.9),
+            ("Bias Detection", "Detect 80%+ approach collapse", ["bias","hyperagents","prevention"], 0.9),
+            ("Self-Healing", "Auto-diagnosis and recovery strategies", ["healing","recovery","error"], 0.8),
+            ("Multi-Agent Fleet", "6 specialized agents for parallel execution", ["fleet","multi-agent","parallel"], 0.8),
+            ("Skill Forge", "Dynamic skill creation from usage patterns", ["skill","forge","creation"], 0.8),
+            ("Neural Memory Grid", "3-tier memory with fluid forgetting", ["memory","grid","neural"], 0.7),
+        ]
+        for title, content, tags, importance in seeds:
+            self.knowledge.add(title, content, tags, source="nexus_seed", importance=importance)
+    
+    # ─── Task Management ────────────────────────────────────────────────────────
+    def create_task(self, name: str, description: str = "", priority: Priority = Priority.MEDIUM,
+                   tags: List[str] = None) -> Dict:
+        """Create a new task"""
+        self._task_count += 1
+        task = Task(
+            id=str(uuid.uuid4())[:8], name=name, description=description,
+            priority=priority, tags=tags or [], created_at=time.time(),
+        )
+        self.memory.store(f"task:{task.id}", asdict(task), priority=0.5)
+        return task
+    
+    def execute_task(self, task: Dict, executor: Callable = None) -> Any:
+        """Execute a task with full monitoring, archiving, and evolution"""
+        task_id = task.get("id", str(uuid.uuid4())[:8])
+        approach = self.router.choose(task.get("name", ""), task.get("metadata", {}))
+        
+        start_time = time.time()
+        error = None
+        result = None
+        
+        try:
+            if executor:
+                result = executor(task, approach)
+            else:
+                result = f"Executed {task.get('name')} with {approach}"
+            
+            duration = time.time() - start_time
+            self.archive.log_success(task.get("name", ""), approach, result, duration)
+            self.memory.store(f"success:{task_id}", {"result": str(result)[:200]}, priority=1.0, tier="warm")
+            self._consecutive_failures = 0
+            
+            # Layer 2 meta-analysis
+            self._meta_analyze(task, approach, result, duration)
+            
+            # Auto-evolution check
+            if self._evolution_enabled:
+                self._maybe_evolve()
+            
+            return result
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            error = traceback.format_exc()
+            self.archive.log_failure(task.get("name", ""), approach, error, duration)
+            self.memory.store(f"failure:{task_id}", {"error": error[:200]}, priority=1.0, tier="hot")
+            self._consecutive_failures += 1
+            
+            # Auto-heal
+            diagnosis = self.healing.diagnose(error, {"task": task})
+            
+            # Layer 2 meta-analysis
+            self._meta_analyze(task, approach, None, duration, error)
+            
+            # Force evolution on consecutive failures
+            if self._consecutive_failures >= self.config.evolution_failure_threshold:
+                self.evolution.evolve()
+            
+            raise
+    
+    def _meta_analyze(self, task: Dict, approach: str, result: Any,
+                     duration: float, error: str = None):
+        """Layer 2: Analyze results for improvement patterns"""
+        patterns_detected = []
+        
+        if duration > 60: patterns_detected.append("slow_execution")
+        if error:
+            rc = self.archive._diagnose_root_cause(error)
+            patterns_detected.append(f"root_cause:{rc}")
+        
+        # Store in knowledge graph
+        self.knowledge.add(
+            title=f"{'Failure' if error else 'Success'}: {task.get('name', '')}",
+            content=f"Approach: {approach} | Duration: {duration:.2f}s | "
+                    f"Patterns: {', '.join(patterns_detected) or 'none'}",
+            tags=["meta-analysis", task.get("name", "").replace(" ", "_")] + patterns_detected,
+            source="meta-layer",
+            importance=0.7,
+        )
+    
+    def _maybe_evolve(self):
+        """Check if evolution should trigger"""
+        if self.evolution.should_evolve():
+            self.evolution.evolve()
+    
+    # ─── High-Level Commands ─────────────────────────────────────────────────────
+    def code(self, description: str) -> Dict[str, Any]:
+        """Autonomous code generation"""
+        gen = self.coding.generate(description)
+        self.archive.log_success("autonomous_code", "generate", gen["project_name"], 0.0)
+        return gen
+    
+    def evolve(self, manual: bool = True) -> Dict[str, Any]:
+        """Trigger evolution cycle"""
+        entry = self.evolution.evolve(manual=manual)
+        if entry:
+            return {
+                "cycle": entry.cycle,
+                "trigger": entry.trigger,
+                "actions": entry.action_taken,
+                "quality_score": entry.quality_score,
+                "bias_detected": entry.bias_detected,
+            }
+        return {"message": "No evolution needed"}
+    
+    # ─── Status & Reporting ─────────────────────────────────────────────────────
+    def status(self) -> Dict[str, Any]:
+        patterns = self.archive.get_patterns()
+        return {
+            "nexus": {
+                "version": self.version,
+                "session": self.session_id,
+                "uptime_seconds": round(time.time() - self.started_at, 1),
+            },
+            "archive": {
+                "successes": patterns.get("successes", 0),
+                "failures": patterns.get("failures", 0),
+                "rate": round(patterns.get("rate", 0), 3),
+                "top_approaches": dict(list(patterns.get("approaches", {}).items())[:5]),
+                "root_causes": dict(list(patterns.get("root_causes", {}).items())[:5]),
+            },
+            "knowledge": self.knowledge.stats(),
+            "coding": self.coding.stats(),
+            "crm": {"mode": self.crm.mode, **self.crm.get_metrics()},
+            "fleet": self.fleet.status(),
+            "skills": self.skill_forge.stats(),
+            "memory": {"hot": len(self.memory._hot), "warm": len(self.memory._warm), "cold": len(self.memory._cold)},
+            "evolution": self.evolution.stats(),
+            "healing": self.healing.stats(),
+        }
+    
+    def enable_evolution(self): self._evolution_enabled = True
+    def disable_evolution(self): self._evolution_enabled = False
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# CLI INTERFACE
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+BANNER = r"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║   ███╗   ██╗███████╗ ██████╗ ███╗   ██╗    ██╗     ██╗██╗  ██╗ ██████╗ ██████╗ ║
+║   ████╗  ██║██╔════╝██╔═══██╗████╗  ██║    ██║     ██║██║ ██╔╝██╔═══██╗██╔══██╗║
+║   ██╔██╗ ██║█████╗  ██║   ██║██╔██╗ ██║    ██║     ██║█████╔╝ ██║   ██║██████╔╝║
+║   ██║╚██╗██║██╔══╝  ██║   ██║██║╚██╗██║    ██║     ██║██╔═██╗ ██║   ██║██╔══██╗║
+║   ██║ ╚████║███████╗╚██████╔╝██║ ╚████║    ███████╗██║██║  ██╗╚██████╔╝██║  ██║║
+║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝║
+║                                                                              ║
+║   Autonomous AI Operating System v{version}                                           ║
+║   Self-Evolving • Self-Healing • Self-Aware                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+
+def format_status(status: Dict) -> str:
+    """Format status output with colors and sections"""
+    lines = []
+    nx = status["nexus"]
+    arc = status["archive"]
+    evo = status["evolution"]
+    mem = status["memory"]
+    fleet = status["fleet"]
+    skills = status["skills"]
+    
+    rate = arc["rate"] * 100
+    rate_color = "🟢" if rate >= 70 else "🟡" if rate >= 40 else "🔴"
+    
+    lines.append(f"\n📊 NEXUS Status — v{nx['version']} | Session: {nx['session']} | Uptime: {nx['uptime_seconds']}s")
+    lines.append(f"\n   🏛️  Archive")
+    lines.append(f"      Success Rate: {rate_color} {rate:.1f}% ({arc['successes']} successes / {arc['failures']} failures)")
+    if arc["top_approaches"]:
+        lines.append(f"      Top Approaches: {', '.join(arc['top_approaches'].keys())}")
+    if arc["root_causes"]:
+        lines.append(f"      Top Issues: {', '.join(arc['root_causes'].keys())}")
+    
+    lines.append(f"\n   🧠 Knowledge")
+    lines.append(f"      Nodes: {status['knowledge']['total_nodes']} | Tags: {status['knowledge']['total_tags']}")
+    
+    lines.append(f"\n   ⚙️  Coding")
+    lines.append(f"      Executions: {status['coding']['executions']} | Success: {status['coding']['success_rate']*100:.0f}%")
+    lines.append(f"      Workspace: {status['coding']['workspace']}")
+    
+    lines.append(f"\n   📋 CRM")
+    lines.append(f"      Mode: {status['crm']['mode']}")
+    if "total_tasks" in status["crm"]:
+        lines.append(f"      Tasks: {status['crm']['total_tasks']}")
+    
+    lines.append(f"\n   👥 Fleet")
+    lines.append(f"      Agents: {fleet['total']} ({fleet['idle']} idle / {fleet['busy']} busy)")
+    for agent in fleet["agents"][:3]:
+        lines.append(f"      • {agent['name']} ({agent['role']}) — {agent['status']} | {agent['tasks_completed']} tasks")
+    
+    lines.append(f"\n   🛠️  Skills")
+    lines.append(f"      Total: {skills.get('total', 0)} | Usages: {skills.get('total_usages', 0)}")
+    
+    lines.append(f"\n   🧩 Memory")
+    lines.append(f"      Hot: {mem['hot']} | Warm: {mem['warm']} | Cold: {mem['cold']}")
+    
+    lines.append(f"\n   🔄 Evolution")
+    lines.append(f"      Cycles: {evo['cycles']} | Avg Quality: {evo['avg_quality']:.2f}")
+    lines.append(f"      Bias Detections: {evo['bias_detections']} | Improvements: {evo['improvements']}")
+    
+    return "\n".join(lines)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="NEXUS OS v3.0 — Autonomous AI Operating System",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Examples:
+              %(prog)s status                    # Show full system status
+              %(prog)s evolve                    # Run evolution cycle
+              %(prog)s code --desc "REST API"   # Generate code autonomously
+              %(prog)s task --name "fix"        # Create and execute a task
+              %(prog)s knowledge --query "bias"  # Search knowledge
+              %(prog)s crm                        # Show CRM status
+              %(prog)s fleet                      # Show fleet status
+              %(prog)s test                       # Run test suite
+        """)
+    )
+    
+    parser.add_argument("command", choices=[
+        "status", "evolve", "code", "task", "knowledge", "crm", "fleet",
+        "archive", "heal", "test", "config", "help"
+    ], help="Command to execute")
+    parser.add_argument("--desc", help="Description for code generation")
+    parser.add_argument("--name", help="Task name")
+    parser.add_argument("--query", "-q", help="Search query")
+    parser.add_argument("--limit", "-n", type=int, default=10, help="Result limit")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--no-evolution", action="store_true", help="Disable auto-evolution")
+    
+    args = parser.parse_args()
+    
+    print(BANNER.format(version=VERSION))
+    
+    nx = NEXUSCore()
+    if args.no_evolution:
+        nx.disable_evolution()
+    
+    if args.command == "status":
+        status = nx.status()
+        if args.json:
+            print(json.dumps(status, indent=2, ensure_ascii=False))
+        else:
+            print(format_status(status))
+    
+    elif args.command == "evolve":
+        result = nx.evolve(manual=True)
+        print(f"\n🔄 Evolution")
+        print(f"   Cycle: {result.get('cycle', 'N/A')}")
+        print(f"   Trigger: {result.get('trigger', 'N/A')}")
+        print(f"   Actions: {result.get('actions', result.get('message', ''))}")
+        print(f"   Quality Score: {result.get('quality_score', 0):.2f}")
+        print(f"   Bias Detected: {result.get('bias_detected', False)}")
+    
+    elif args.command == "code":
+        if not args.desc:
+            print("Error: --desc required for code generation")
+            sys.exit(1)
+        result = nx.code(args.desc)
+        print(f"\n💻 Code Generation")
+        print(f"   Project: {result['project_name']}")
+        print(f"   Template: {result['template_used']}")
+        print(f"   Files: {', '.join(result['files'])}")
+        print(f"   Location: {result['project_dir']}")
+        exec_result = nx.coding.execute(result["project_dir"])
+        print(f"   Execution: {'✅ Success' if exec_result.get('success') else '❌ Failed'}")
+        if exec_result.get("stdout"):
+            print(f"   Output: {exec_result['stdout'][:200]}")
+        if exec_result.get("stderr"):
+            print(f"   Error: {exec_result['stderr'][:200]}")
+    
+    elif args.command == "task":
+        if not args.name:
+            print("Error: --name required for task")
+            sys.exit(1)
+        task = nx.create_task(args.name, args.desc or "")
+        print(f"\n🎯 Task Created: {task.name} (id: {task.id})")
+        result = nx.execute_task(asdict(task))
+        print(f"   Result: {str(result)[:200]}")
+    
+    elif args.command == "knowledge":
+        if not args.query:
+            stats = nx.knowledge.stats()
+            print(f"\n🧠 Knowledge Graph — {stats['total_nodes']} nodes, {stats['total_tags']} tags")
+            if stats.get("top_tags"):
+                print(f"   Top Tags: {', '.join(stats['top_tags'].keys())}")
+        else:
+            results = nx.knowledge.search(args.query, limit=args.limit)
+            print(f"\n🧠 Knowledge Search: '{args.query}'")
+            for r in results:
+                print(f"   [{r['id']}] {r['title']}: {r['content'][:100]}")
+    
+    elif args.command == "crm":
+        status = nx.crm.status()
+        metrics = nx.crm.get_metrics()
+        print(f"\n📋 Twenty CRM — Mode: {status['mode']}")
+        if metrics:
+            for k, v in metrics.items():
+                print(f"   {k}: {v}")
+    
+    elif args.command == "fleet":
+        fleet = nx.fleet.status()
+        print(f"\n👥 Multi-Agent Fleet — {fleet['total']} agents")
+        print(f"   Idle: {fleet['idle']} | Busy: {fleet['busy']}")
+        for agent in fleet["agents"]:
+            print(f"   • {agent['name']} ({agent['role']}) — {agent['status']}")
+            print(f"     Tasks: {agent['tasks_completed']} | Avg Score: {agent['avg_score']}")
+    
+    elif args.command == "archive":
+        patterns = nx.archive.get_patterns()
+        print(f"\n🏛️  Archive — {patterns['successes']} successes / {patterns['failures']} failures")
+        print(f"   Success Rate: {patterns['rate']*100:.1f}%")
+        print(f"   Top Approaches: {', '.join(patterns['approaches'].keys())}")
+        print(f"   Root Causes: {', '.join(patterns['root_causes'].keys())}")
+    
+    elif args.command == "heal":
+        stats = nx.healing.stats()
+        print(f"\n🩹 Self-Healing — {stats['total_healings']} healings")
+        if stats.get("by_root_cause"):
+            print("   By Root Cause:")
+            for rc, count in stats["by_root_cause"].items():
+                print(f"     {rc}: {count}x")
+    
+    elif args.command == "config":
+        cfg = nx.config
+        print(f"\n⚙️  NEXUS Config")
+        for k, v in asdict(cfg).items():
+            if "token" in k.lower() or "key" in k.lower():
+                v = "***" if v else "not set"
+            print(f"   {k}: {v}")
+    
+    elif args.command == "test":
+        print("\n🧪 Running NEXUS v3.0 Tests...\n")
+        tests_passed = 0
+        tests_total = 0
+        
+        def test(name: str, fn: Callable):
+            nonlocal tests_passed, tests_total
+            tests_total += 1
+            try:
+                fn()
+                print(f"  ✅ {name}")
+                tests_passed += 1
+            except Exception as e:
+                print(f"  ❌ {name}: {e}")
+        
+        def test_archive():
+            nx2 = NEXUSCore()
+            nx2.archive.log_success("test_task", "test_approach", "test_result", 1.5)
+            nx2.archive.log_failure("test_task", "bad_approach", "error message", 0.5)
+            patterns = nx2.archive.get_patterns(use_cache=False)
+            assert patterns["successes"] >= 1, f"Expected successes >= 1, got {patterns['successes']}"
+            assert patterns["failures"] >= 1, f"Expected failures >= 1, got {patterns['failures']}"
+        
+        def test_knowledge():
+            nx2 = NEXUSCore()
+            node = nx2.knowledge.add("Test", "Test content", tags=["test"])
+            assert node["id"] is not None
+            results = nx2.knowledge.search("test")
+            assert len(results) >= 1
+        
+        def test_healing():
+            nx2 = NEXUSCore()
+            d = nx2.healing.diagnose("Permission denied: /root/file.txt")
+            assert d["root_cause"] == "permission_issue"
+            assert len(d["strategies"]) >= 1
+        
+        def test_coding():
+            nx2 = NEXUSCore()
+            result = nx2.code("web scraper for headlines")
+            assert result["project_name"] is not None
+            assert len(result["files"]) >= 2
+            assert Path(result["project_dir"]).exists()
+        
+        def test_evolution():
+            nx2 = NEXUSCore()
+            nx2.archive.log_failure("evolve_test", "test_approach", "test error", 0.1)
+            entry = nx2.evolution.evolve(manual=True)
+            assert entry is not None
+            assert entry.cycle >= 1
+        
+        def test_meta_meta():
+            nx2 = NEXUSCore()
+            nx2.archive.log_success("bias_test", "approach_a", "result", 1.0)
+            for _ in range(5):
+                nx2.archive.log_failure("bias_test", "approach_a", "error", 0.5)
+            reflection = nx2.meta_meta.reflect()
+            assert reflection["layer"] == 3
+            assert reflection["bias_assessment"]["level"] is not None
+        
+        def test_fleet():
+            nx2 = NEXUSCore()
+            fleet = nx2.fleet.status()
+            assert fleet["total"] >= 5
+            best = nx2.fleet.select_best("write code for me")
+            assert best is not None
+        
+        def test_memory():
+            nx2 = NEXUSCore()
+            nx2.memory.store("test_key", "test_value", priority=0.8, tier="hot")
+            val = nx2.memory.retrieve("test_key")
+            assert val == "test_value"
+            results = nx2.memory.search("test")
+            assert len(results) >= 1
+        
+        def test_crm():
+            nx2 = NEXUSCore()
+            assert nx2.crm.mode in ("live", "mock")
+            task = nx2.crm.create_task("Test Task", "Test desc")
+            assert task["id"] is not None
+            tasks = nx2.crm.get_tasks()
+            assert len(tasks) >= 1
+        
+        def test_skills():
+            nx2 = NEXUSCore()
+            skill = nx2.skill_forge.create("test_skill", "A test skill", "print('hello')", ["test"])
+            assert skill["name"] == "test_skill"
+            found = nx2.skill_forge.find("test")
+            assert len(found) >= 1
+            nx2.skill_forge.record_usage("test_skill", True, 1.0)
+        
+        def test_status():
+            nx2 = NEXUSCore()
+            s = nx2.status()
+            assert s["nexus"]["version"] == VERSION
+            assert s["nexus"]["session"] is not None
+        
+        test("Archive (logging + patterns)", test_archive)
+        test("Knowledge Graph (add + search)", test_knowledge)
+        test("Self-Healing (diagnose + strategies)", test_healing)
+        test("Autonomous Coding (generate)", test_coding)
+        test("Evolution Engine (cycles)", test_evolution)
+        test("Meta-Meta Layer (bias detection)", test_meta_meta)
+        test("Multi-Agent Fleet (select + status)", test_fleet)
+        test("Neural Memory Grid (store + retrieve)", test_memory)
+        test("Twenty CRM (create + get tasks)", test_crm)
+        test("Skill Forge (create + find)", test_skills)
+        test("Full Status Report", test_status)
+        
+        print(f"\n{'='*50}")
+        print(f"🧪 Results: {tests_passed}/{tests_total} tests passed")
+        if tests_passed == tests_total:
+            print(f"✅ All tests passed!")
+        else:
+            print(f"❌ {tests_total - tests_passed} tests failed")
+            sys.exit(1)
+    
+    elif args.command == "help":
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

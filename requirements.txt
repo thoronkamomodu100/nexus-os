@@ -1,0 +1,6 @@
+# NEXUS OS — Requirements
+# Core engine: stdlib only (Python 3.10+)
+# Optional dependencies:
+requests>=2.28.0  # For Twenty CRM API calls
+beautifulsoup4>=4.11.0  # For web scraper template
+flask>=2.3.0  # For REST API template
