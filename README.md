@@ -15,12 +15,14 @@
 
 </div>
 
----
+**Self-Evolving • Self-Healing • Self-Aware • Claude Code Powered**
 
 ## ✨ Features
 
 | Feature | Description |
 |---------|-------------|
+| **Claude Code Integration** | Real AI-powered code generation — any language, any framework |
+| **Smart Routing** | Templates for common patterns (instant), Claude Code for complex tasks (powerful) |
 | **HyperAgents 3-Layer** | Task → Meta → Meta-Meta improvement architecture |
 | **Stepping Stones Archive** | Every success/failure stored as reusable experience |
 | **Bias Detection** | Auto-detect 80%+ approach collapse, force alternatives |

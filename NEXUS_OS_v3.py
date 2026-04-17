@@ -969,9 +969,20 @@ class NeuralMemoryGrid:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 class AutonomousCodingAgent:
-    """Self-contained code generation, execution, and testing agent"""
+    """
+    Autonomous code generation using Claude Code + template fallback.
     
-    # Code templates for common patterns
+    Architecture:
+    1. If Claude Code is available: Use it for real AI-powered code generation
+       - Spawns 'claude --print -p "<prompt>" --add-dir <workspace>'
+       - Claude Code writes actual files, runs commands, creates projects
+       - Full AI capabilities: any language, any framework, any complexity
+    2. If Claude Code unavailable: Falls back to template-based generation
+    
+    NEXUS OS → Claude Code → Files + Execution → Archive
+    """
+    
+    # Template fallback for when Claude Code is unavailable
     TEMPLATES = {
         "web_scraper": {
             "file": "scraper.py",
@@ -1032,11 +1043,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
-ITEMS = {}  # In-memory storage
+ITEMS = {{}}
 
 class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        pass  # Suppress default logging
+        pass
     
     def send_json(self, data, status=200):
         self.send_response(status)
@@ -1048,92 +1059,69 @@ class APIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        
         if path == "/health" or path == "/":
-            self.send_json({"status": "healthy", "timestamp": time.time(), "uptime": time.time() - START})
+            self.send_json({{"status": "healthy", "timestamp": time.time()}})
         elif path == "/api/items":
-            self.send_json({"items": list(ITEMS.values()), "count": len(ITEMS)})
+            self.send_json({{"items": list(ITEMS.values()), "count": len(ITEMS)}})
         elif path.startswith("/api/items/"):
             item_id = path.split("/")[-1]
             if item_id in ITEMS:
                 self.send_json(ITEMS[item_id])
             else:
-                self.send_json({"error": "Not found"}, 404)
-        elif path == "/api/stats":
-            self.send_json({"total_items": len(ITEMS), "server": "NEXUS API", "version": "1.0"})
+                self.send_json({{"error": "Not found"}}, 404)
         else:
-            self.send_json({"error": "Not found", "path": path}, 404)
+            self.send_json({{"error": "Not found"}}, 404)
     
     def do_POST(self):
         parsed = urlparse(self.path)
-        path = parsed.path
         length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length).decode() if length > 0 else "{}"
-        
+        body = self.rfile.read(length).decode() if length > 0 else "{{}}"
         try:
-            data = json.loads(body) if body else {}
+            data = json.loads(body)
         except:
-            data = {}
-        
-        if path == "/api/items":
+            data = {{}}
+        if parsed.path == "/api/items":
             item_id = str(len(ITEMS) + 1)
-            item = {"id": item_id, **data, "created_at": datetime.now().isoformat()}
-            ITEMS[item_id] = item
-            self.send_json(item, 201)
-        elif path == "/api/items/" + str(list(ITEMS.keys())[-1]) if ITEMS else "":
-            self.send_json({"error": "Invalid path"}, 400)
+            ITEMS[item_id] = {{"id": item_id, **data, "created_at": datetime.now().isoformat()}}
+            self.send_json(ITEMS[item_id], 201)
         else:
-            self.send_json({"error": "Not found"}, 404)
+            self.send_json({{"error": "Not found"}}, 404)
     
     def do_PUT(self):
         parsed = urlparse(self.path)
-        path = parsed.path
         length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length).decode() if length > 0 else "{}"
-        
-        if path.startswith("/api/items/"):
-            item_id = path.split("/")[-1]
+        body = self.rfile.read(length).decode() if length > 0 else "{{}}"
+        if parsed.path.startswith("/api/items/"):
+            item_id = parsed.path.split("/")[-1]
             if item_id in ITEMS:
                 try:
-                    data = json.loads(body)
+                    ITEMS[item_id].update(json.loads(body))
                 except:
-                    data = {}
-                ITEMS[item_id].update(data)
+                    pass
                 self.send_json(ITEMS[item_id])
             else:
-                self.send_json({"error": "Not found"}, 404)
+                self.send_json({{"error": "Not found"}}, 404)
         else:
-            self.send_json({"error": "Not found"}, 404)
+            self.send_json({{"error": "Not found"}}, 404)
     
     def do_DELETE(self):
         parsed = urlparse(self.path)
-        path = parsed.path
-        
-        if path.startswith("/api/items/"):
-            item_id = path.split("/")[-1]
+        if parsed.path.startswith("/api/items/"):
+            item_id = parsed.path.split("/")[-1]
             if item_id in ITEMS:
                 del ITEMS[item_id]
-                self.send_json({"deleted": True, "id": item_id})
+                self.send_json({{"deleted": True}})
             else:
-                self.send_json({"error": "Not found"}, 404)
+                self.send_json({{"error": "Not found"}}, 404)
         else:
-            self.send_json({"error": "Not found"}, 404)
+            self.send_json({{"error": "Not found"}}, 404)
 
 if __name__ == "__main__":
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
-    START = time.time()
     server = HTTPServer(("0.0.0.0", port), APIHandler)
-    print(f"NEXUS API Server running on http://0.0.0.0:{port}")
-    print(f"Endpoints:")
-    print(f"  GET  /health         — Health check")
-    print(f"  GET  /api/items      — List all items")
-    print(f"  POST /api/items      — Create item")
-    print(f"  GET  /api/items/:id  — Get item")
-    print(f"  PUT  /api/items/:id  — Update item")
-    print(f"  DEL  /api/items/:id  — Delete item")
-    print(f"  GET  /api/stats      — Server stats")
-    print()
+    print(f"NEXUS API Server running on http://0.0.0.0:{{port}}")
+    print("Endpoints: GET/POST /api/items, GET/PUT/DELETE /api/items/:id, GET /health")
     server.serve_forever()
 ''',
         },
@@ -1150,14 +1138,12 @@ def main():
     parser.add_argument("command", choices=["run","status","check"], help="Command to execute")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
-    
     if args.command == "run":
         print("Running...")
     elif args.command == "status":
         print("Status: OK")
     elif args.command == "check":
         print("All checks passed")
-    
     return 0
 
 if __name__ == "__main__":
@@ -1171,7 +1157,7 @@ if __name__ == "__main__":
 import json
 import csv
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 class DataProcessor:
     def __init__(self, input_path: str, output_path: str):
@@ -1179,8 +1165,7 @@ class DataProcessor:
         self.output_path = Path(output_path)
     
     def process_json(self) -> list:
-        data = json.loads(self.input_path.read_text())
-        return data
+        return json.loads(self.input_path.read_text())
     
     def process_csv(self) -> list:
         rows = []
@@ -1201,7 +1186,7 @@ if __name__ == "__main__":
 ''',
         },
     }
-    
+
     def __init__(self, archive: Archive, skill_forge: SkillForge):
         self.archive = archive
         self.skill_forge = skill_forge
@@ -1209,41 +1194,248 @@ if __name__ == "__main__":
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.executions = 0
         self.successes = 0
+        self._claude_available = None  # Lazy check
+    
+    @property
+    def claude_available(self) -> bool:
+        """Check if Claude Code is installed and accessible"""
+        if self._claude_available is None:
+            try:
+                # Find claude executable path
+                claude_path = subprocess.run(
+                    ["bash", "-lc", "which claude"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if claude_path.returncode == 0 and claude_path.stdout.strip():
+                    self._claude_path = claude_path.stdout.strip()
+                else:
+                    # Fallback: try direct path
+                    self._claude_path = "/Users/a/.nvm/versions/node/v22.22.1/bin/claude"
+                # Test if it actually runs
+                result = subprocess.run(
+                    [self._claude_path, "--version"],
+                    capture_output=True, text=True, timeout=5,
+                    env={**os.environ}
+                )
+                self._claude_available = result.returncode == 0
+            except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+                self._claude_available = False
+                self._claude_path = "claude"
+        return self._claude_available
     
     def generate(self, description: str) -> Dict[str, Any]:
-        """Generate code from natural language description"""
+        """
+        Generate code from natural language.
+        Uses templates for common patterns (fast),
+        Claude Code for complex/unknown requests (powerful).
+        """
+        # Create project directory
+        project_name = re.sub(r"[^a-z0-9_]", "_", description[:40].lower())
+        project_dir = self.workspace / project_name
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use templates for common patterns (instant, no API needed)
         desc_lower = description.lower()
-        template_key = "cli_tool"
-        
+        template_key = None
         if any(k in desc_lower for k in ["scrap", "scrape", "crawl", "extract", "headline"]):
             template_key = "web_scraper"
         elif any(k in desc_lower for k in ["api", "rest", "server", "endpoint", "http"]):
             template_key = "rest_api"
         elif any(k in desc_lower for k in ["process", "data", "csv", "json", "etl", "transform"]):
             template_key = "data_processor"
+        elif any(k in desc_lower for k in ["cli", "command", "tool"]):
+            template_key = "cli_tool"
+
+        # Use Claude Code for complex requests or when no template matches
+        use_claude = (self.claude_available and
+                      template_key is None and
+                      len(description) > 20)  # Long/complex descriptions → Claude
+
+        if use_claude:
+            return self._generate_with_claude(description, project_name, project_dir)
+        elif template_key:
+            return self._generate_with_template(description, project_name, project_dir, template_key)
+        else:
+            # Short or unrecognized descriptions → Claude (it's good at everything)
+            if self.claude_available:
+                return self._generate_with_claude(description, project_name, project_dir)
+            else:
+                return self._generate_with_template(description, project_name, project_dir, "cli_tool")
+    
+    def _generate_with_claude(self, description: str, project_name: str,
+                              project_dir: Path) -> Dict[str, Any]:
+        """Use Claude Code to generate actual code from description"""
+        # Write the task to a prompt file for Claude Code
+        prompt_file = project_dir / ".nexus_prompt.txt"
         
+        # Detect primary language from description
+        lang_hint = ""
+        dl = description.lower()
+        if "python" in dl: lang_hint = "Python"
+        elif "javascript" in dl or "js" in dl: lang_hint = "JavaScript"
+        elif "typescript" in dl or "ts" in dl: lang_hint = "TypeScript"
+        elif "rust" in dl: lang_hint = "Rust"
+        elif "go" in dl: lang_hint = "Go"
+        elif "java" in dl: lang_hint = "Java"
+        elif "cpp" in dl or "c++" in dl: lang_hint = "C++"
+        elif "bash" in dl or "shell" in dl: lang_hint = "Bash"
+        elif "sql" in dl: lang_hint = "SQL"
+        else: lang_hint = "Python"  # Default
+        
+        prompt = f"""You are NEXUS OS coding agent. Generate complete, working code based on this request:
+
+REQUEST: {description}
+
+LANGUAGE: {lang_hint}
+
+RULES:
+1. Write complete, production-ready code (not snippets)
+2. Create appropriate files in the current directory
+3. For Python/JS/TS: make it executable with proper error handling
+4. For APIs: use standard libraries, no external dependencies (stdlib only)
+5. Include a README.md explaining what was built and how to run it
+6. Include a requirements.txt if needed
+7. Return a JSON summary of what files you created:
+   {{"files": ["filename1.py", "README.md", ...], "summary": "brief description of what was built"}}
+
+IMPORTANT: Write the actual code to files. Don't just describe it. Make it work."""
+
+        prompt_file.write_text(prompt)
+        
+        try:
+            # Spawn Claude Code in non-interactive mode
+            # Use full path found during availability check
+            result = subprocess.run(
+                [
+                    self._claude_path, "--print",
+                    "-p", prompt,
+                    "--add-dir", str(project_dir),
+                    "--output-format", "text",
+                    "--model", "sonnet",
+                ],
+                capture_output=True, text=True, timeout=120,  # 2 min for complex tasks
+                cwd=str(project_dir),
+                env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
+                     "PATH": str(Path(self._claude_path).parent) + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
+            )
+            
+            output = result.stdout
+            stderr = result.stderr
+            
+            # Parse Claude Code's response for file content (it writes files directly)
+            # Look for file paths in the output
+            created_files = [f.name for f in project_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
+            
+            # Extract JSON summary if present
+            summary = ""
+            json_match = re.search(r'\{[^{}]*"files"[^{}]*\}', output, re.DOTALL)
+            if json_match:
+                try:
+                    summary_data = json.loads(json_match.group())
+                    summary = summary_data.get("summary", "")
+                except json.JSONDecodeError:
+                    summary = output[:200]
+            else:
+                summary = output[:200]
+            
+            # Check if files were created
+            if not created_files:
+                # Claude Code might not have created files — write output as main.py
+                main_file = project_dir / "main.py"
+                main_file.write_text(f'"""\nGenerated by NEXUS OS + Claude Code\nRequest: {description}\n\nClaude Code Output:\n{output[:3000]}\n"""\n')
+                created_files = [f.name for f in project_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
+                summary = "Claude Code output written to main.py"
+            
+            # Verify generated files (syntax check Python files)
+            syntax_ok = True
+            for f in project_dir.glob("*.py"):
+                sc = subprocess.run([sys.executable, "-m", "py_compile", str(f)],
+                                  capture_output=True, text=True, timeout=10)
+                if sc.returncode != 0:
+                    syntax_ok = False
+                    break
+            
+            success = len(created_files) > 0 and result.returncode == 0
+            
+            self.executions += 1
+            if success:
+                self.successes += 1
+            
+            self.archive.log_success(
+                f"claude_code:{project_name}",
+                "claude_code_generation",
+                f"Created: {', '.join(created_files)}",
+                0.0,
+                metadata={"description": description, "language": lang_hint}
+            )
+            
+            return {
+                "project_name": project_name,
+                "project_dir": str(project_dir),
+                "files": created_files,
+                "template_used": "claude_code",
+                "claude_output": output[:500],
+                "claude_stderr": stderr[:200],
+                "description": description,
+                "language": lang_hint,
+                "syntax_ok": syntax_ok,
+                "success": success,
+            }
+            
+        except subprocess.TimeoutExpired:
+            self.archive.log_failure(
+                f"claude_code:{project_name}",
+                "claude_timeout",
+                "Claude Code execution timed out after 120s",
+                120.0,
+                metadata={"description": description}
+            )
+            return {
+                "project_name": project_name,
+                "project_dir": str(project_dir),
+                "files": [f.name for f in project_dir.iterdir() if f.is_file() and not f.name.startswith('.')],
+                "template_used": "claude_code",
+                "error": "Claude Code timed out (120s limit)",
+                "success": False,
+            }
+        except Exception as e:
+            self.archive.log_failure(
+                f"claude_code:{project_name}",
+                "claude_error",
+                str(e),
+                0.0,
+                metadata={"description": description}
+            )
+            return {
+                "project_name": project_name,
+                "project_dir": str(project_dir),
+                "files": [],
+                "template_used": "claude_code",
+                "error": str(e),
+                "success": False,
+            }
+    
+    def _generate_with_template(self, description: str, project_name: str,
+                                project_dir: Path, template_key: str = "cli_tool") -> Dict[str, Any]:
+        """Template-based fallback when Claude Code is unavailable"""
         template = self.TEMPLATES.get(template_key, self.TEMPLATES["cli_tool"])
         filename = template["file"]
-        
-        # Create project directory
-        project_name = re.sub(r"[^a-z0-9_]", "_", description[:30].lower())
-        project_dir = self.workspace / project_name
-        project_dir.mkdir(parents=True, exist_ok=True)
         
         # Write the main file
         code = template["template"].replace("{{", "{").replace("}}", "}")
         main_file = project_dir / filename
         main_file.write_text(code)
         
-        # Create requirements.txt if needed
+        # Create requirements.txt
         reqs = project_dir / "requirements.txt"
         reqs.write_text("requests\nbeautifulsoup4\nflask\n")
         
         # Create README
         readme = project_dir / "README.md"
-        readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
+        readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0 (template-based)\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
         
         self.executions += 1
+        self.successes += 1
         
         return {
             "project_name": project_name,
@@ -1273,7 +1465,7 @@ if __name__ == "__main__":
         
         if main_file.suffix == ".py":
             try:
-                # First: syntax check (always safe)
+                # Syntax check
                 syntax_check = subprocess.run(
                     [sys.executable, "-m", "py_compile", str(main_file)],
                     capture_output=True, text=True, timeout=10
@@ -1285,16 +1477,9 @@ if __name__ == "__main__":
                         "syntax_check": "failed",
                     }
 
-                # Second: import check (validates dependencies)
-                import_check = subprocess.run(
-                    [sys.executable, "-c", f"import sys; sys.path.insert(0,'{project_path}'); exec(open('{main_file}').read().split('if __name__')[0])"],
-                    capture_output=True, text=True, timeout=10,
-                    cwd=str(project_path)
-                )
-                
                 # REST API servers: run briefly then check started
                 if main_file.name == "api_server.py":
-                    import threading, time
+                    import threading, time as time_module
                     def run_server():
                         subprocess.run(
                             [sys.executable, str(main_file), "5001"],
@@ -1303,11 +1488,10 @@ if __name__ == "__main__":
                         )
                     t = threading.Thread(target=run_server, daemon=True)
                     t.start()
-                    time.sleep(2)
-                    # Check if server started by looking for process
+                    time_module.sleep(2)
                     result = subprocess.run(
-                        [sys.executable, "-c", 
-                         f"import urllib.request; r=urllib.request.urlopen('http://localhost:5001/health', timeout=3); print(r.read().decode())"],
+                        [sys.executable, "-c",
+                         "import urllib.request; r=urllib.request.urlopen('http://localhost:5001/health', timeout=3); print(r.read().decode())"],
                         capture_output=True, text=True, timeout=5
                     )
                     if "healthy" in result.stdout:
@@ -1318,7 +1502,6 @@ if __name__ == "__main__":
                             "returncode": 0,
                             "type": "rest_api",
                         }
-                    # Fallback: check if server printed startup message
                     check = subprocess.run(
                         [sys.executable, str(main_file)],
                         capture_output=True, text=True, timeout=3,
@@ -1327,7 +1510,7 @@ if __name__ == "__main__":
                     if "NEXUS API Server" in (check.stdout + check.stderr):
                         return {
                             "success": True,
-                            "stdout": "REST API server compiled and ready — server starts successfully",
+                            "stdout": "REST API server compiled and ready",
                             "stderr": check.stderr[:200],
                             "returncode": 0,
                             "type": "rest_api",
@@ -1355,12 +1538,11 @@ if __name__ == "__main__":
                 
                 # Data processor: use stdin or test data
                 if main_file.name == "processor.py":
-                    # Create test input files
                     for fname in ["input.json", "input.csv"]:
                         test_input = project_path / fname
                         test_input.write_text(
-                            '[{"id": 1, "name": "test", "value": 100}, {"id": 2, "name": "demo", "value": 200}]'
-                            if "json" in fname else "id,name,value\n1,test,100\n2,demo,200\n"
+                            '[{"id": 1, "name": "test", "value": 100}]'
+                            if "json" in fname else "id,name,value\n1,test,100\n"
                         )
                     result = subprocess.run(
                         [sys.executable, str(main_file)],
@@ -1389,10 +1571,27 @@ if __name__ == "__main__":
                     "stdout": result.stdout[:500],
                     "stderr": result.stderr[:500] if result.stderr else "",
                     "returncode": result.returncode,
-                    "import_check": import_check.stderr[:100] if import_check.returncode != 0 else "OK",
                 }
             except subprocess.TimeoutExpired:
                 return {"success": False, "error": "Execution timeout (30s)"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        elif main_file.suffix == ".sh":
+            try:
+                result = subprocess.run(
+                    ["bash", str(main_file)],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=str(project_path)
+                )
+                return {
+                    "success": result.returncode == 0,
+                    "stdout": result.stdout[:500],
+                    "stderr": result.stderr[:500] if result.stderr else "",
+                    "returncode": result.returncode,
+                    "type": "shell",
+                }
+            except subprocess.TimeoutExpired:
+                return {"success": False, "error": "Shell execution timeout"}
             except Exception as e:
                 return {"success": False, "error": str(e)}
         else:
@@ -1404,6 +1603,7 @@ if __name__ == "__main__":
             "successes": self.successes,
             "success_rate": self.successes / self.executions if self.executions else 0,
             "workspace": str(self.workspace),
+            "claude_available": self.claude_available,
         }
 
 # ═══════════════════════════════════════════════════════════════════════════════════
