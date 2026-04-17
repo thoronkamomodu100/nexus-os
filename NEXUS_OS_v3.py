@@ -1475,47 +1475,64 @@ if __name__ == "__main__":
     
     def _generate_with_claude(self, description: str, project_name: str,
                               project_dir: Path) -> Dict[str, Any]:
-        """Use Claude Code to generate actual code from description"""
-        # Write the task to a prompt file for Claude Code
-        prompt_file = project_dir / ".nexus_prompt.txt"
-        
+        """
+        Use Claude Code to generate actual code from description.
+        Parses markdown code blocks from Claude output and writes files directly.
+        """
         # Detect primary language from description
         lang_hint = ""
         dl = description.lower()
-        if "python" in dl: lang_hint = "Python"
-        elif "javascript" in dl or "js" in dl: lang_hint = "JavaScript"
-        elif "typescript" in dl or "ts" in dl: lang_hint = "TypeScript"
-        elif "rust" in dl: lang_hint = "Rust"
-        elif "go" in dl: lang_hint = "Go"
-        elif "java" in dl: lang_hint = "Java"
-        elif "cpp" in dl or "c++" in dl: lang_hint = "C++"
-        elif "bash" in dl or "shell" in dl: lang_hint = "Bash"
-        elif "sql" in dl: lang_hint = "SQL"
-        else: lang_hint = "Python"  # Default
-        
-        prompt = f"""You are NEXUS OS coding agent. Generate complete, working code based on this request:
+        if "python" in dl: lang_hint = "python"
+        elif "javascript" in dl or "js" in dl: lang_hint = "javascript"
+        elif "typescript" in dl or "ts" in dl: lang_hint = "typescript"
+        elif "rust" in dl: lang_hint = "rust"
+        elif "go" in dl: lang_hint = "go"
+        elif "java" in dl: lang_hint = "java"
+        elif "cpp" in dl or "c++" in dl: lang_hint = "cpp"
+        elif "bash" in dl or "shell" in dl: lang_hint = "bash"
+        elif "sql" in dl: lang_hint = "sql"
+        else: lang_hint = "python"
+
+        # Extension mapping
+        ext_map = {
+            "python": "py", "javascript": "js", "typescript": "ts",
+            "rust": "rs", "go": "go", "java": "java", "cpp": "cpp", "bash": "sh", "sql": "sql"
+        }
+        ext = ext_map.get(lang_hint, "py")
+
+        prompt = f"""You are NEXUS OS coding agent. Generate complete, working code.
 
 REQUEST: {description}
 
-LANGUAGE: {lang_hint}
+LANGUAGE: {lang_hint.upper()}
 
 RULES:
-1. Write complete, production-ready code (not snippets)
-2. Create appropriate files in the current directory
-3. For Python/JS/TS: make it executable with proper error handling
-4. For APIs: use standard libraries, no external dependencies (stdlib only)
-5. Include a README.md explaining what was built and how to run it
-6. Include a requirements.txt if needed
-7. Return a JSON summary of what files you created:
-   {{"files": ["filename1.py", "README.md", ...], "summary": "brief description of what was built"}}
+1. Write complete, production-ready code
+2. Use standard libraries only (no external dependencies)
+3. Include proper error handling
+4. Include a main() function or CLI interface
+5. For the main file, use this EXACT format for your response:
 
-IMPORTANT: Write the actual code to files. Don't just describe it. Make it work."""
+```json
+{{"files": [{{"name": "main.{ext}", "description": "main entry point"}}]}}
+```
 
-        prompt_file.write_text(prompt)
-        
+6. Then provide the code in markdown code blocks like this:
+
+```python
+# main.py content here
+def main():
+    pass
+```
+
+```python
+# another_file.py content
+```
+
+IMPORTANT: Be specific about filenames. Use descriptive names.
+Return JSON first, then all code in separate code blocks."""
+
         try:
-            # Spawn Claude Code in non-interactive mode
-            # Use full path found during availability check
             result = subprocess.run(
                 [
                     self._claude_path, "--print",
@@ -1524,40 +1541,58 @@ IMPORTANT: Write the actual code to files. Don't just describe it. Make it work.
                     "--output-format", "text",
                     "--model", "sonnet",
                 ],
-                capture_output=True, text=True, timeout=120,  # 2 min for complex tasks
+                capture_output=True, text=True, timeout=120,
                 cwd=str(project_dir),
                 env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
                      "PATH": str(Path(self._claude_path).parent) + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
             )
-            
+
             output = result.stdout
             stderr = result.stderr
-            
-            # Parse Claude Code's response for file content (it writes files directly)
-            # Look for file paths in the output
-            created_files = [f.name for f in project_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
-            
-            # Extract JSON summary if present
-            summary = ""
+
+            # Parse markdown code blocks from output
+            code_blocks = re.findall(r'```(?:\w+)?\n(.*?)```', output, re.DOTALL)
+
+            # Parse JSON from output (find first JSON object)
+            json_summary = {}
             json_match = re.search(r'\{[^{}]*"files"[^{}]*\}', output, re.DOTALL)
             if json_match:
                 try:
-                    summary_data = json.loads(json_match.group())
-                    summary = summary_data.get("summary", "")
+                    json_summary = json.loads(json_match.group())
                 except json.JSONDecodeError:
-                    summary = output[:200]
-            else:
-                summary = output[:200]
-            
-            # Check if files were created
-            if not created_files:
-                # Claude Code might not have created files — write output as main.py
-                main_file = project_dir / "main.py"
-                main_file.write_text(f'"""\nGenerated by NEXUS OS + Claude Code\nRequest: {description}\n\nClaude Code Output:\n{output[:3000]}\n"""\n')
-                created_files = [f.name for f in project_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
-                summary = "Claude Code output written to main.py"
-            
-            # Verify generated files (syntax check Python files)
+                    pass
+
+            # Write each code block to a file
+            created_files = []
+            filespecs = json_summary.get("files", [])
+
+            for i, code in enumerate(code_blocks):
+                code = code.strip()
+                if not code or len(code) < 10:
+                    continue
+
+                # Determine filename
+                if i < len(filespecs) and filespecs[i].get("name"):
+                    filename = filespecs[i]["name"]
+                else:
+                    filename = f"generated_{i+1}.{ext}"
+
+                # Clean filename
+                filename = re.sub(r'[^\w\-_.]', '_', filename)
+
+                # Write the file
+                filepath = project_dir / filename
+                filepath.write_text(code)
+                created_files.append(filename)
+
+            # If no files created from code blocks, try to extract just one
+            if not created_files and output.strip():
+                # Last resort: write the whole output as main file
+                main_file = project_dir / f"main.{ext}"
+                main_file.write_text(output.strip())
+                created_files.append(f"main.{ext}")
+
+            # Verify syntax for Python files
             syntax_ok = True
             for f in project_dir.glob("*.py"):
                 sc = subprocess.run([sys.executable, "-m", "py_compile", str(f)],
@@ -1565,21 +1600,21 @@ IMPORTANT: Write the actual code to files. Don't just describe it. Make it work.
                 if sc.returncode != 0:
                     syntax_ok = False
                     break
-            
+
             success = len(created_files) > 0 and result.returncode == 0
-            
+
             self.executions += 1
             if success:
                 self.successes += 1
-            
+
             self.archive.log_success(
                 f"claude_code:{project_name}",
                 "claude_code_generation",
                 f"Created: {', '.join(created_files)}",
                 0.0,
-                metadata={"description": description, "language": lang_hint}
+                metadata={"description": description, "language": lang_hint, "files": created_files}
             )
-            
+
             return {
                 "project_name": project_name,
                 "project_dir": str(project_dir),
@@ -1592,7 +1627,7 @@ IMPORTANT: Write the actual code to files. Don't just describe it. Make it work.
                 "syntax_ok": syntax_ok,
                 "success": success,
             }
-            
+
         except subprocess.TimeoutExpired:
             self.archive.log_failure(
                 f"claude_code:{project_name}",
@@ -1604,9 +1639,9 @@ IMPORTANT: Write the actual code to files. Don't just describe it. Make it work.
             return {
                 "project_name": project_name,
                 "project_dir": str(project_dir),
-                "files": [f.name for f in project_dir.iterdir() if f.is_file() and not f.name.startswith('.')],
+                "files": [],
                 "template_used": "claude_code",
-                "error": "Claude Code timed out (120s limit)",
+                "error": "Claude Code timed out after 120s",
                 "success": False,
             }
         except Exception as e:
@@ -1630,13 +1665,25 @@ IMPORTANT: Write the actual code to files. Don't just describe it. Make it work.
                          previous_error: str, attempt: int) -> Dict[str, Any]:
         """
         Use Claude Code to fix code that failed execution.
-        Called by the self-healing loop when execute() fails.
+        Parses markdown code blocks from output and writes fixed files.
         """
         # Read existing files to understand context
-        existing_code = {}
+        existing_files = {}
         for f in project_dir.iterdir():
             if f.is_file() and not f.name.startswith('.') and f.suffix == '.py':
-                existing_code[f.name] = f.read_text()[:2000]  # First 2000 chars
+                existing_files[f.name] = f.read_text()
+
+        if not existing_files:
+            return {
+                "files": [],
+                "error": "No Python files found to fix",
+                "success": False,
+                "attempt": attempt,
+            }
+
+        # Primary file to fix
+        primary_file = list(existing_files.keys())[0]
+        primary_ext = Path(primary_file).suffix
 
         # Build the fix prompt
         fix_prompt = f"""You are a bug fixer. Fix the error in the code.
@@ -1647,17 +1694,29 @@ ERROR OCCURRED:
 {previous_error}
 
 EXISTING FILES:
-{json.dumps(existing_code, indent=2, ensure_ascii=False)}
+{json.dumps(existing_files, indent=2, ensure_ascii=False)[:3000]}
 
 RULES:
-1. Read the existing files to understand the code
-2. Identify the bug causing the error
-3. Fix ONLY the problematic parts
-4. Write the corrected files back to disk
-5. Make sure the code is syntactically correct and runs
+1. Fix ONLY the problematic parts — be surgical
+2. Write the corrected code using EXACTLY the same filenames as the original files
+3. Return the fixed code in markdown code blocks
 
-IMPORTANT: Fix the actual error. Do not rewrite everything. Be surgical.
-"""
+FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
+```json
+{{"files": [{{"name": "{primary_file}", "description": "main entry point"}}]}}
+```
+
+```python
+# {primary_file} - FIXED VERSION
+[your fixed code here]
+```
+
+```python
+# [other_file.py] - FIXED VERSION
+[your fixed code here]
+```
+
+IMPORTANT: Use the SAME filenames. Do not rename files."""
 
         try:
             result = subprocess.run(
@@ -1675,30 +1734,65 @@ IMPORTANT: Fix the actual error. Do not rewrite everything. Be surgical.
             )
 
             output = result.stdout
-            created_files = [f.name for f in project_dir.iterdir()
-                           if f.is_file() and not f.name.startswith('.') and f.suffix == '.py']
 
-            # Verify syntax of fixed files
+            # Parse markdown code blocks
+            code_blocks = re.findall(r'```(?:\w+)?\n(.*?)```', output, re.DOTALL)
+
+            # Parse JSON for filenames
+            json_summary = {}
+            json_match = re.search(r'\{[^{}]*"files"[^{}]*\}', output, re.DOTALL)
+            if json_match:
+                try:
+                    json_summary = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    pass
+
+            # Write each code block to a file
+            fixed_files = []
+            filespecs = json_summary.get("files", [])
+
+            for i, code in enumerate(code_blocks):
+                code = code.strip()
+                if not code or len(code) < 10:
+                    continue
+                # Skip if it looks like JSON metadata
+                if code.startswith('{') and '"files"' in code:
+                    continue
+                if code.startswith('"files"'):
+                    continue
+
+                if i < len(filespecs) and filespecs[i].get("name"):
+                    filename = filespecs[i]["name"]
+                else:
+                    filename = f"fixed_{i+1}{primary_ext}"
+
+                filename = re.sub(r'[^\w\-_.]', '_', filename)
+                filepath = project_dir / filename
+                filepath.write_text(code)
+                fixed_files.append(filename)
+
+            # Verify syntax
             syntax_ok = True
-            for f in project_dir.glob("*.py"):
-                sc = subprocess.run([sys.executable, "-m", "py_compile", str(f)],
-                                  capture_output=True, text=True, timeout=10)
-                if sc.returncode != 0:
-                    syntax_ok = False
-                    break
+            for f in fixed_files:
+                if f.endswith('.py'):
+                    sc = subprocess.run([sys.executable, "-m", "py_compile", str(project_dir / f)],
+                                      capture_output=True, text=True, timeout=10)
+                    if sc.returncode != 0:
+                        syntax_ok = False
+                        break
 
-            success = (result.returncode == 0 and len(created_files) > 0)
+            success = len(fixed_files) > 0 and result.returncode == 0
 
             self.archive.log_success(
                 f"claude_fix:{project_dir.name}",
                 f"claude_fix_attempt_{attempt}",
-                f"Fixed: {', '.join(created_files)}",
+                f"Fixed: {', '.join(fixed_files)}",
                 0.0,
-                metadata={"error": previous_error[:200], "attempt": attempt}
+                metadata={"error": previous_error[:200], "attempt": attempt, "files_fixed": fixed_files}
             )
 
             return {
-                "files": created_files,
+                "files": fixed_files,
                 "claude_output": output[:500],
                 "syntax_ok": syntax_ok,
                 "success": success,
@@ -1708,7 +1802,7 @@ IMPORTANT: Fix the actual error. Do not rewrite everything. Be surgical.
 
         except subprocess.TimeoutExpired:
             return {
-                "files": [f.name for f in project_dir.iterdir() if f.is_file() and f.suffix == '.py'],
+                "files": list(existing_files.keys()),
                 "error": "Claude Code fix timed out",
                 "success": False,
                 "attempt": attempt,
