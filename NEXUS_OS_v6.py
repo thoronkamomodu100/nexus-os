@@ -116,7 +116,7 @@ class ArchiveSync:
         return {"synced": synced, "total_patterns": total}
 
     def sync_from_sqlite(self) -> dict:
-        """Load patterns from SQLite into NEXUSCore archive."""
+        # Load patterns from SQLite into NEXUSCore archive (read-only — Archive uses log_success/log_failure)
         patterns = self.store.get_patterns(limit=100)
         loaded = 0
         for p in patterns:
