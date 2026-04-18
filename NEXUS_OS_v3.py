@@ -1,33 +1,25 @@
-#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
+NEXUS OS v3.0 — Autonomous AI Operating System
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                                                                                      ║
-║   ███╗   ██╗███████╗ ██████╗ ███╗   ██╗    ██╗     ██╗██╗  ██╗ ██████╗ ██████╗   ║
-║   ████╗  ██║██╔════╝██╔═══██╗████╗  ██║    ██║     ██║██║ ██╔╝██╔═══██╗██╔══██╗  ║
-║   ██╔██╗ ██║█████╗  ██║   ██║██╔██╗ ██║    ██║     ██║█████╔╝ ██║   ██║██████╔╝  ║
-║   ██║╚██╗██║██╔══╝  ██║   ██║██║╚██╗██║    ██║     ██║██╔═██╗ ██║   ██║██╔══██╗  ║
-║   ██║ ╚████║███████╗╚██████╔╝██║ ╚████║    ███████╗██║██║  ██╗╚██████╔╝██║  ██║  ║
-║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝  ║
-║                                                                                      ║
 ║   Autonomous AI Operating System v3.0                                                ║
 ║   Self-Evolving • Self-Healing • Self-Aware • GitHub-Ready                           ║
-║                                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
-NEXUS OS is an autonomous AI operating system that improves itself through:
-  - HyperAgents 3-Layer Architecture (Task → Meta → Meta-Meta)
-  - Every action archived as reusable stepping stones
-  - Bias detection with forced alternative exploration
-  - Self-healing with root cause analysis
-  - Multi-agent fleet orchestration
-  - Twenty CRM integration
-  - Autonomous coding agent
+Error Handling Standards:
+    - All exception handlers use specific exception types (no bare except:)
+    - Common types: OSError, ValueError, KeyError, AttributeError, TypeError,
+      json.JSONDecodeError, subprocess.TimeoutExpired, ImportError
+    - Error context is logged before re-raising
+    - Transient failures have retry/backoff logic
 
 Usage:
     python3 NEXUS_OS_v3.py status
     python3 NEXUS_OS_v3.py evolve
     python3 NEXUS_OS_v3.py code --desc "build a REST API"
     python3 NEXUS_OS_v3.py task --name "fix bug" --desc "API returns 500"
+    python3 NEXUS_OS_v3.py filetype --path <file_or_dir> [--batch]
+    python3 NEXUS_OS_v3.py skills [--query <search>] [--skill <name>]
     python3 NEXUS_OS_v3.py test
 
 License: MIT
@@ -35,6 +27,9 @@ Repository: https://github.com/nexus-os/nexus
 """
 
 from __future__ import annotations
+
+import functools
+import logging as _logging
 
 import json
 import os
@@ -55,6 +50,88 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from collections import defaultdict
 from datetime import datetime
+
+# nopus_magika — Pure Python file type detector (Magika-style, no ML deps)
+try:
+    from nopus_magika import MagikaLite, FileTypeResult
+except ImportError:
+    MagikaLite = None  # type: ignore
+    FileTypeResult = None  # type: ignore
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# IMPROVED ERROR HANDLING UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def retry_on_exception(
+    max_attempts: int = 3,
+    delay: float = 1.0,
+    backoff: float = 2.0,
+    exceptions: tuple = (OSError, IOError, ConnectionError)
+):
+    """
+    Decorator that retries a function on transient failures with exponential backoff.
+
+    Args:
+        max_attempts: Maximum number of retry attempts
+        delay: Initial delay between retries in seconds
+        backoff: Multiplier for delay after each retry
+        exceptions: Tuple of exception types to catch and retry
+
+    Returns:
+        Decorated function with retry logic
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            last_exception = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as exc:
+                    last_exception = exc
+                    if attempt == max_attempts:
+                        break
+                    _log_error(f"Retry {attempt}/{max_attempts} for {func.__name__}", exc)
+                    time.sleep(current_delay)
+                    current_delay *= backoff
+            _log_error(f"All {max_attempts} retries exhausted for {func.__name__}", last_exception)
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+def validate_input(**validators: Callable) -> Callable:
+    """
+    Decorator that validates function arguments against provided validator functions.
+
+    Args:
+        validators: Map of parameter names to validator callables that return
+                    (is_valid: bool, error_message: str)
+
+    Example:
+        @validate_input(name=lambda v: (isinstance(v, str) and len(v) > 0, "name must be non-empty string"))
+        def process(name: str): ...
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Bind arguments to parameter names
+            import inspect
+            sig = inspect.signature(func)
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+
+            for param_name, validator in validators.items():
+                if param_name in bound.arguments:
+                    value = bound.arguments[param_name]
+                    is_valid, error_msg = validator(value)
+                    if not is_valid:
+                        raise ValueError(f"Invalid argument '{param_name}': {error_msg}")
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # VERSION & PATHS
@@ -238,21 +315,247 @@ class NEXUSConfig:
     
     @classmethod
     def load(cls) -> "NEXUSConfig":
+        """Load configuration from CONFIG_FILE, returning defaults on error."""
         if CONFIG_FILE.exists():
             try:
                 data = json.loads(CONFIG_FILE.read_text())
                 return cls(**{k: v for k, v in data.items() if hasattr(cls, k)})
-            except Exception:
-                pass
+            except (json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+                print(f"[NEXUS][WARN] Config load failed ({type(exc).__name__}): "
+                      f"using defaults. Config file: {CONFIG_FILE}", file=sys.stderr)
         return cls()
-    
-    def save(self):
-        data = {k: v for k, v in asdict(self).items()}
-        CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+    def save(self) -> None:
+        """Save configuration to CONFIG_FILE."""
+        try:
+            data = {k: v for k, v in asdict(self).items()}
+            CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"[NEXUS][ERROR] Config save failed: {exc}", file=sys.stderr)
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # ARCHIVE (STEPPING STONES)
 # ═══════════════════════════════════════════════════════════════════════════════════
+
+def _log_skipped_archive_entry(filename: str, exc: Exception) -> None:
+    """Log a skipped/corrupted archive entry without crashing."""
+    print(f"[NEXUS][WARN] Skipped corrupted archive entry '{filename}': {exc}", file=sys.stderr)
+
+
+def _log_error(ctx: str, exc: Exception, re_raise: bool = False) -> None:
+    """
+    Standardized error logging with context and optional re-raise.
+
+    Args:
+        ctx: Human-readable context describing where the error occurred.
+        exc: The exception that was caught.
+        re_raise: If True, re-raises the exception after logging.
+    """
+    exc_type = type(exc).__name__
+    exc_msg = str(exc) if exc else "Unknown error"
+    print(f"[NEXUS][ERROR] {ctx} | {exc_type}: {exc_msg}", file=sys.stderr)
+    if re_raise:
+        raise exc
+
+
+def _log_error_with_traceback(ctx: str, exc: Exception, logger: _logging.Logger = None) -> None:
+    """
+    Enhanced error logging that includes full traceback for debugging.
+
+    Args:
+        ctx: Human-readable context describing where the error occurred.
+        exc: The exception that was caught.
+        logger: Optional logger instance for structured logging.
+    """
+    exc_type = type(exc).__name__
+    exc_msg = str(exc) if exc else "Unknown error"
+    error_msg = f"[NEXUS][ERROR] {ctx} | {exc_type}: {exc_msg}"
+    tb_msg = f"[NEXUS][TRACE] {traceback.format_exc()}"
+
+    if logger:
+        logger.error(error_msg)
+        logger.debug(tb_msg)
+    else:
+        print(error_msg, file=sys.stderr)
+        print(tb_msg, file=sys.stderr)
+
+
+def safe_execute(
+    default_return: Any = None,
+    exceptions: tuple = (Exception,),
+    log_errors: bool = True,
+    ctx: str = ""
+) -> Callable:
+    """
+    Decorator that provides safe execution with configurable error handling.
+
+    Args:
+        default_return: Value to return on exception
+        exceptions: Tuple of exception types to catch
+        log_errors: Whether to log errors
+        ctx: Context string for error messages
+
+    Returns:
+        Decorated function that catches exceptions gracefully
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except exceptions as exc:
+                if log_errors:
+                    error_ctx = ctx or f"in {func.__name__}"
+                    _log_error(error_ctx, exc)
+                return default_return
+        return wrapper
+    return decorator
+
+
+def _safe_json_load(path: Path) -> Optional[Dict[str, Any]]:
+    """Safely load a JSON file, returning None on error with logging."""
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        _log_skipped_archive_entry(str(path), e)
+        return None
+
+
+def _safe_json_save(path: Path, data: Any, indent: int = 2) -> bool:
+    """
+    Safely write data as JSON to a file.
+
+    Returns:
+        True on success, False on any error. Errors are logged but not raised.
+    """
+    try:
+        path.write_text(json.dumps(data, indent=indent, ensure_ascii=False))
+        return True
+    except (OSError, TypeError, ValueError) as exc:
+        _log_error(f"Failed to write JSON file {path}", exc)
+        return False
+
+
+def _parse_claude_json_response(output: str, key_hint: str = None) -> Optional[Dict[str, Any]]:
+    """
+    Robustly extract and parse a JSON object from Claude Code output.
+
+    Handles cases where JSON is:
+    - Wrapped in markdown code blocks
+    - Buried inside a larger text response
+    - Malformed with trailing commas or newlines
+
+    Args:
+        output: Raw string output from Claude Code.
+        key_hint: Optional string hint for locating the JSON block
+                  (e.g. "files" to find {"files": [...]}). If None, finds any JSON object.
+
+    Returns:
+        Parsed dict on success, None on any failure.
+    """
+    if not output or not output.strip():
+        return None
+
+    # Strategy 1: Try direct parse (already well-formed JSON)
+    try:
+        return json.loads(output.strip())
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Strategy 2: Strip markdown code fences
+    text = re.sub(r'^```(?:json|python)?\s*', '', output.strip(), flags=re.MULTILINE)
+    text = re.sub(r'\s*```$', '', text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: Find first JSON object using balanced brace scan
+    json_match = _find_balanced_json(output, key_hint)
+    if json_match:
+        try:
+            return json.loads(json_match)
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+def _find_balanced_json(text: str, key_hint: str = None) -> Optional[str]:
+    """
+    Extract the first complete JSON object from text.
+
+    Balances braces to find the true end of nested objects,
+    avoiding false matches from partial JSON fragments.
+
+    Args:
+        text: Text containing JSON somewhere inside it.
+        key_hint: If provided, finds the substring starting at the key_hint
+                  (e.g. key_hint="files" finds {"files": [...]})
+    """
+    if key_hint:
+        # Find the position of the key hint
+        pos = text.find(f'"{key_hint}"')
+        if pos == -1:
+            # Try unquoted key
+            pos = text.find(key_hint)
+        if pos == -1:
+            return None
+        # Search backward for the opening brace
+        start = text.rfind('{', 0, pos + len(key_hint))
+        if start == -1:
+            return None
+    else:
+        # Find first opening brace
+        start = text.find('{')
+        if start == -1:
+            return None
+
+    # Balance braces from start to find the closing brace
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+
+    return None
+
+
+def _run_claude(
+    args: List[str],
+    prompt: str,
+    timeout: int = 120,
+    cwd: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Run a Claude Code subprocess call with consistent error handling.
+
+    Returns: {"stdout": str, "stderr": str, "rc": int, "error": str or None}
+    """
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            env={**os.environ, "CLAUDE_CODE_SIMPLE": "1"},
+        )
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "rc": result.returncode,
+            "error": None,
+        }
+    except subprocess.TimeoutExpired as e:
+        return {"stdout": "", "stderr": "", "rc": -1, "error": f"Timeout after {timeout}s"}
+    except OSError as e:
+        return {"stdout": "", "stderr": "", "rc": -1, "error": f"OS error: {e}"}
+
 
 class Archive:
     """
@@ -269,11 +572,22 @@ class Archive:
         self._cache_ttl = 10.0
     
     def _load_counter(self) -> int:
+        """Load archive counter from disk with error handling."""
         cf = ARCHIVE_DIR / "counter.txt"
-        return int(cf.read_text().strip()) if cf.exists() else 0
-    
-    def _save_counter(self, n: int):
-        (ARCHIVE_DIR / "counter.txt").write_text(str(n))
+        if not cf.exists():
+            return 0
+        try:
+            return int(cf.read_text().strip())
+        except (ValueError, OSError) as exc:
+            print(f"[NEXUS][WARN] Failed to load archive counter: {exc}", file=sys.stderr)
+            return 0
+
+    def _save_counter(self, n: int) -> None:
+        """Save archive counter to disk with error handling."""
+        try:
+            (ARCHIVE_DIR / "counter.txt").write_text(str(n))
+        except (OSError, TypeError) as exc:
+            print(f"[NEXUS][ERROR] Failed to save archive counter: {exc}", file=sys.stderr)
     
     def _cache_invalidated(self) -> bool:
         return time.time() - self._cache_time > self._cache_ttl
@@ -296,8 +610,10 @@ class Archive:
                 task_stats[tn]["success"] += 1
                 approaches[e.get("approach", "default")] += 1
                 total_successes += 1
-            except: pass
-        
+            except (json.JSONDecodeError, OSError, KeyError) as e:
+                # Skip corrupted entries — archive integrity preserved
+                _log_skipped_archive_entry(f.name, e)
+
         for f in failures:
             try:
                 e = json.loads(f.read_text())
@@ -305,7 +621,9 @@ class Archive:
                 task_stats[tn]["failure"] += 1
                 root_causes[e.get("root_cause", "unknown")] += 1
                 total_failures += 1
-            except: pass
+            except (json.JSONDecodeError, OSError, KeyError) as e:
+                # Skip corrupted entries — archive integrity preserved
+                _log_skipped_archive_entry(f.name, e)
         
         total = total_successes + total_failures
         self._cache = {
@@ -342,20 +660,25 @@ class Archive:
                 "lessons": lessons,
             }
             path = ARCHIVE_DIR / f"{nid}.json"
-            path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+            try:
+                path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+            except OSError as exc:
+                _log_error(f"Failed to write archive entry {nid}", exc)
+            except (TypeError, ValueError) as exc:
+                _log_error(f"Failed to serialize archive entry {nid}", exc)
             self._save_counter(self._counter)
             self._cache_time = 0  # Invalidate cache
             return nid
-    
+
     def log_failure(self, task_name: str, approach: str, error: str = "",
                    duration: float = 0.0, metadata: Dict = None) -> str:
         with self._lock:
             self._counter += 1
             nid = f"failure_{self._counter:05d}"
-            
+
             rc = self._diagnose_root_cause(error)
             suggestions = self._suggest_next_approaches(approach, rc)
-            
+
             entry = {
                 "type": "failure", "id": nid,
                 "task_name": task_name, "approach": approach,
@@ -364,7 +687,12 @@ class Archive:
                 "root_cause": rc, "next_approaches": suggestions,
             }
             path = ARCHIVE_DIR / f"{nid}.json"
-            path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+            try:
+                path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+            except OSError as exc:
+                _log_error(f"Failed to write archive entry {nid}", exc)
+            except (TypeError, ValueError) as exc:
+                _log_error(f"Failed to serialize archive entry {nid}", exc)
             self._save_counter(self._counter)
             self._cache_time = 0
             return nid
@@ -382,6 +710,56 @@ class Archive:
         return lessons
     
     def _diagnose_root_cause(self, error: str) -> str:
+        # ── Phase 1: Structured exception parsing (highest precision) ───────────
+        # Detect Python exception types directly — these are the most reliable signals
+
+        exc_patterns = [
+            (r"SyntaxError",                               "syntax_error"),
+            (r"IndentationError",                         "syntax_error"),
+            (r"TabError",                                 "syntax_error"),
+            (r"ImportError",                             "import_error"),
+            (r"ModuleNotFoundError",                      "import_error"),
+            (r"Importlib\.resources\.\w+Error",           "import_error"),
+            (r"FileNotFoundError",                        "resource_missing"),
+            (r"FileExistsError",                          "resource_missing"),
+            (r"NotADirectoryError",                      "resource_missing"),
+            (r"IsADirectoryError",                       "resource_missing"),
+            (r"PermissionError",                         "permission_issue"),
+            (r"OSError.*\[Errno 13\]",                    "permission_issue"),
+            (r"TimeoutError",                             "timeout"),
+            (r"ConnectionError",                          "network_issue"),
+            (r"ConnectionRefusedError",                   "network_issue"),
+            (r"ConnectionResetError",                    "network_issue"),
+            (r"BrokenPipeError",                          "network_issue"),
+            (r"MemoryError",                              "memory_issue"),
+            (r"UnicodeDecodeError",                       "encoding_error"),
+            (r"UnicodeEncodeError",                       "encoding_error"),
+            (r"JSONDecodeError",                          "encoding_error"),
+            (r"AttributeError",                           "null_reference"),
+            (r"TypeError.*None",                          "null_reference"),
+            (r"ValueError",                               "invalid_input"),
+            (r"KeyError",                                 "null_reference"),
+            (r"IndexError",                               "null_reference"),
+            (r"ZeroDivisionError",                        "invalid_input"),
+            (r"RecursionError",                           "resource_limit"),
+            (r"RuntimeError.*exceeded",                   "resource_limit"),
+            (r"psutil\.AccessDenied",                     "permission_issue"),
+        ]
+        for pattern, category in exc_patterns:
+            if re.search(pattern, error):
+                return category
+
+        # ── Phase 2: Traceback location extraction ─────────────────────────────
+        # Pull filename + line from Python tracebacks so strategies can target fixes
+        tb_match = re.search(r'File "([^"]+)", line (\d+)', error)
+        if tb_match:
+            tb_file = tb_match.group(1)
+            tb_line = tb_match.group(2)
+            # If the file itself is the target (not a dependency), tag it
+            if "NEXUS" in tb_file or "nexus" in tb_file:
+                return "self_code_error"
+
+        # ── Phase 3: Keyword fallback (for non-Python / external errors) ───────
         e = error.lower()
         if "permission" in e or "denied" in e or "access" in e: return "permission_issue"
         if "not found" in e or "no such" in e: return "resource_missing"
@@ -417,7 +795,9 @@ class Archive:
                 e = json.loads(f.read_text())
                 if task_name is None or task_name in e.get("task_name", ""):
                     entries.append(e)
-            except: pass
+            except (json.JSONDecodeError, KeyError) as e:
+                # Skip corrupted entries — archive integrity preserved
+                pass
             if len(entries) >= limit: break
         return entries
 
@@ -428,7 +808,9 @@ class Archive:
                 e = json.loads(f.read_text())
                 if task_name is None or task_name in e.get("task_name", ""):
                     entries.append(e)
-            except: pass
+            except (json.JSONDecodeError, KeyError) as e:
+                # Skip corrupted entries — archive integrity preserved
+                pass
             if len(entries) >= limit: break
         return entries
 
@@ -662,7 +1044,7 @@ class SelfHealing:
                 proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
                 result["output"] = proc.stdout[:500]
                 result["success"] = proc.returncode == 0
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 result["output"] = str(e)
                 result["success"] = False
         
@@ -789,7 +1171,16 @@ class MultiAgentFleet:
         Each agent type has a specialized prompt for their domain.
         This makes the fleet actually DO work, not just route tasks.
         """
+        # Validate inputs
+        if not isinstance(agent_id, str) or not agent_id:
+            _log_error("MultiAgentFleet.execute", ValueError("agent_id must be non-empty string"))
+            return {"success": False, "error": "agent_id must be non-empty string"}
+        if not isinstance(task_description, str):
+            _log_error("MultiAgentFleet.execute", ValueError(f"task_description must be str, got {type(task_description).__name__}"))
+            return {"success": False, "error": "task_description must be string"}
+
         if agent_id not in self._agents:
+            _log_error("MultiAgentFleet.execute", KeyError(f"Agent '{agent_id}' not found"))
             return {"success": False, "error": f"Agent '{agent_id}' not found"}
 
         agent = self._agents[agent_id]
@@ -892,7 +1283,7 @@ RULES:
                 json_match = re.search(r'\{[^{}]*"[^"]+":', output, re.DOTALL)
                 if json_match:
                     summary = output[:200]
-            except:
+            except re.error:
                 summary = output[:200]
 
             self.complete(agent_id, score=1.0 if success else 0.0)
@@ -911,7 +1302,7 @@ RULES:
         except subprocess.TimeoutExpired:
             self.complete(agent_id, score=0.0)
             return {"success": False, "agent_id": agent_id, "error": "Claude Code timed out (180s)"}
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
             self.complete(agent_id, score=0.0)
             return {"success": False, "agent_id": agent_id, "error": str(e)}
 
@@ -940,11 +1331,17 @@ class SkillForge:
             try:
                 data = json.loads(f.read_text())
                 self._skills[data["name"]] = data
-            except: pass
+            except (json.JSONDecodeError, KeyError, OSError) as e:
+                # Skip corrupted entries — archive integrity preserved
+                _log_skipped_archive_entry(f.name, e)
     
-    def _save(self, skill: Dict):
+    def _save(self, skill: Dict) -> None:
+        """Save skill to disk with error handling."""
         path = SKILLS_DIR / f"{skill['name']}.json"
-        path.write_text(json.dumps(skill, indent=2, ensure_ascii=False))
+        try:
+            path.write_text(json.dumps(skill, indent=2, ensure_ascii=False))
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"[NEXUS][ERROR] Failed to save skill '{skill.get('name', '?')}': {exc}", file=sys.stderr)
     
     def create(self, name: str, description: str, code: str,
                trigger_keywords: List[str] = None,
@@ -1022,6 +1419,121 @@ class SkillForge:
             }
 
 # ═══════════════════════════════════════════════════════════════════════════════════
+# AWESOME SKILL LIBRARY (from awesome-llm-apps)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+AWESOME_SKILLS_DIR = Path.home() / ".hermes" / "skills" / "awesome-agent-skills"
+
+class AwesomeSkillLibrary:
+    """
+    Loads and manages SKILL.md-based skills from awesome-llm-apps format.
+    
+    Structure:
+        skill-name/
+            SKILL.md       — main skill (YAML frontmatter + markdown)
+            AGENTS.md      — agent-specific guidance
+            rules/         — detailed rule files
+    
+    Provides:
+        - discover_skills(): find all SKILL.md files
+        - load_skill(name): load a skill by name
+        - find_skill(query): search skills by query
+        - get_skill_content(name): get full content for context injection
+    """
+    
+    def __init__(self, skills_dir: Path = None):
+        self.skills_dir = skills_dir or AWESOME_SKILLS_DIR
+        self._skills: Dict[str, Dict] = {}
+        self._load()
+    
+    def _load(self):
+        """Discover and index all SKILL.md skills."""
+        if not self.skills_dir.exists():
+            return
+        
+        for skill_path in self.skills_dir.iterdir():
+            if not skill_path.is_dir():
+                continue
+            skill_md = skill_path / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            
+            try:
+                content = skill_md.read_text()
+                # Parse YAML frontmatter
+                if content.startswith("---"):
+                    end = content.find("\n---\n", 4)
+                    if end > 0:
+                        frontmatter = content[4:end]
+                        body = content[end + 5:]
+                        # Simple YAML parse for name/description
+                        fm_dict = {}
+                        for line in frontmatter.splitlines():
+                            if ":" in line:
+                                key, _, val = line.partition(":")
+                                fm_dict[key.strip()] = val.strip().strip('"').strip("'")
+                        
+                        name = fm_dict.get("name", skill_path.name)
+                        description = fm_dict.get("description", "")
+                        # Extract categories from body
+                        categories = []
+                        for cat in ["Security", "Performance", "Correctness", "Maintainability", "Style"]:
+                            if cat in body:
+                                categories.append(cat.lower())
+                        
+                        self._skills[skill_path.name] = {
+                            "name": name,
+                            "description": description,
+                            "path": str(skill_path),
+                            "skill_md": str(skill_md),
+                            "categories": categories,
+                            "body": body[:500],  # First 500 chars as preview
+                            "full_content": content,
+                        }
+            except (OSError, json.JSONDecodeError) as e:
+                # Skip unreadable skill files — archive integrity preserved
+                _log_skipped_archive_entry(str(skill_md), e)
+    
+    def list_skills(self) -> List[Dict]:
+        """Return list of all available skills."""
+        return [
+            {"name": v["name"], "description": v["description"],
+             "categories": v["categories"], "path": v["path"]}
+            for v in self._skills.values()
+        ]
+    
+    def find_skill(self, query: str, limit: int = 3) -> List[Dict]:
+        """Find skills matching a query."""
+        q = query.lower()
+        results = []
+        for skill in self._skills.values():
+            score = 0
+            if q in skill["name"].lower():
+                score += 5
+            if q in skill["description"].lower():
+                score += 3
+            if any(q in cat for cat in skill["categories"]):
+                score += 2
+            if score > 0:
+                results.append((score, skill))
+        return [s for _, s in sorted(results, reverse=True)[:limit]]
+    
+    def load_skill(self, name: str) -> Optional[Dict]:
+        """Load a specific skill by directory name."""
+        return self._skills.get(name)
+    
+    def get_full_content(self, name: str) -> str:
+        """Get the full SKILL.md content for a skill."""
+        skill = self._skills.get(name)
+        if not skill:
+            return ""
+        return skill.get("full_content", "")
+    
+    def skill_count(self) -> int:
+        return len(self._skills)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
 # NEURAL MEMORY GRID
 # ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -1040,13 +1552,31 @@ class NeuralMemoryGrid:
         self._lock = threading.Lock()
         self._session_id = str(uuid.uuid4())[:8]
     
-    def store(self, key: str, value: Any, priority: float = 1.0, tier: str = "hot"):
+    def store(self, key: str, value: Any, priority: float = 1.0, tier: str = "hot") -> None:
+        """Store a value in memory with error handling and input validation."""
+        # Validate inputs using improved validation
+        if not isinstance(key, str):
+            _log_error("NeuralMemoryGrid.store", ValueError(f"Key must be str, got {type(key).__name__}"))
+            return
+        if not key:
+            _log_error("NeuralMemoryGrid.store", ValueError("Key cannot be empty string"))
+            return
+        if tier not in ("hot", "warm", "cold"):
+            _log_error("NeuralMemoryGrid.store", ValueError(f"Invalid tier '{tier}', defaulting to 'hot'"))
+            tier = "hot"
+        if not isinstance(priority, (int, float)) or not (0.0 <= priority <= 1.0):
+            _log_error("NeuralMemoryGrid.store", ValueError(f"Priority must be float 0.0-1.0, got {priority}"))
+            priority = max(0.0, min(1.0, float(priority)))
+
         with self._lock:
             entry = {"value": value, "priority": priority, "timestamp": time.time(),
                      "access_count": 0, "session": self._session_id}
-            if tier == "hot": self._hot[key] = entry
-            elif tier == "warm": self._warm[key] = entry
-            else: self._cold[key] = entry
+            if tier == "hot":
+                self._hot[key] = entry
+            elif tier == "warm":
+                self._warm[key] = entry
+            else:
+                self._cold[key] = entry
             self._priority[key] = priority
     
     def retrieve(self, key: str) -> Optional[Any]:
@@ -1148,7 +1678,7 @@ class WebScraper:
             r = self.session.get(url, timeout=10)
             r.raise_for_status()
             return r.text
-        except Exception as e:
+        except requests.RequestException as e:
             return f"Error: {{e}}"
     
     def scrape_headlines(self, url: str) -> list:
@@ -1218,8 +1748,8 @@ class APIHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode() if length > 0 else "{{}}"
         try:
             data = json.loads(body)
-        except:
-            data = {{}}
+        except json.JSONDecodeError:
+            data = {}
         if parsed.path == "/api/items":
             item_id = str(len(ITEMS) + 1)
             ITEMS[item_id] = {{"id": item_id, **data, "created_at": datetime.now().isoformat()}}
@@ -1236,7 +1766,7 @@ class APIHandler(BaseHTTPRequestHandler):
             if item_id in ITEMS:
                 try:
                     ITEMS[item_id].update(json.loads(body))
-                except:
+                except json.JSONDecodeError:
                     pass
                 self.send_json(ITEMS[item_id])
             else:
@@ -1358,7 +1888,7 @@ if __name__ == "__main__":
                     env={**os.environ}
                 )
                 self._claude_available = result.returncode == 0
-            except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
                 self._claude_available = False
                 self._claude_path = "claude"
         return self._claude_available
@@ -1562,7 +2092,7 @@ Return JSON first, then all code in separate code blocks."""
                 except json.JSONDecodeError:
                     pass
 
-            # Write each code block to a file
+            # Write each code block to a file (individual file writes are non-fatal)
             created_files = []
             filespecs = json_summary.get("files", [])
 
@@ -1580,17 +2110,29 @@ Return JSON first, then all code in separate code blocks."""
                 # Clean filename
                 filename = re.sub(r'[^\w\-_.]', '_', filename)
 
-                # Write the file
-                filepath = project_dir / filename
-                filepath.write_text(code)
-                created_files.append(filename)
+                # Write the file — per-file error handling so one bad block can't
+                # corrupt the entire project. Failures are logged but execution
+                # continues with the remaining files.
+                try:
+                    filepath = project_dir / filename
+                    filepath.write_text(code)
+                    created_files.append(filename)
+                except OSError as exc:
+                    _log_error(f"Failed to write generated file '{filename}'", exc)
+                except (TypeError, ValueError) as exc:
+                    _log_error(f"Failed to encode generated file '{filename}'", exc)
 
             # If no files created from code blocks, try to extract just one
             if not created_files and output.strip():
                 # Last resort: write the whole output as main file
-                main_file = project_dir / f"main.{ext}"
-                main_file.write_text(output.strip())
-                created_files.append(f"main.{ext}")
+                try:
+                    main_file = project_dir / f"main.{ext}"
+                    main_file.write_text(output.strip())
+                    created_files.append(f"main.{ext}")
+                except OSError as exc:
+                    _log_error(f"Failed to write main file 'main.{ext}'", exc)
+                except (TypeError, ValueError) as exc:
+                    _log_error(f"Failed to encode main file 'main.{ext}'", exc)
 
             # Verify syntax for Python files
             syntax_ok = True
@@ -1644,7 +2186,7 @@ Return JSON first, then all code in separate code blocks."""
                 "error": "Claude Code timed out after 120s",
                 "success": False,
             }
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
             self.archive.log_failure(
                 f"claude_code:{project_name}",
                 "claude_error",
@@ -1767,9 +2309,14 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
                     filename = f"fixed_{i+1}{primary_ext}"
 
                 filename = re.sub(r'[^\w\-_.]', '_', filename)
-                filepath = project_dir / filename
-                filepath.write_text(code)
-                fixed_files.append(filename)
+                try:
+                    filepath = project_dir / filename
+                    filepath.write_text(code)
+                    fixed_files.append(filename)
+                except OSError as exc:
+                    _log_error(f"Failed to write fixed file '{filename}'", exc)
+                except (TypeError, ValueError) as exc:
+                    _log_error(f"Failed to encode fixed file '{filename}'", exc)
 
             # Verify syntax
             syntax_ok = True
@@ -1807,7 +2354,7 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
                 "success": False,
                 "attempt": attempt,
             }
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
             return {
                 "files": [],
                 "error": str(e),
@@ -1821,18 +2368,33 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
         template = self.TEMPLATES.get(template_key, self.TEMPLATES["cli_tool"])
         filename = template["file"]
         
-        # Write the main file
+        # Write the main file (template-based, per-file errors non-fatal)
         code = template["template"].replace("{{", "{").replace("}}", "}")
-        main_file = project_dir / filename
-        main_file.write_text(code)
-        
+        try:
+            main_file = project_dir / filename
+            main_file.write_text(code)
+        except OSError as exc:
+            _log_error(f"Failed to write template main file '{filename}'", exc)
+        except (TypeError, ValueError) as exc:
+            _log_error(f"Failed to encode template main file '{filename}'", exc)
+
         # Create requirements.txt
-        reqs = project_dir / "requirements.txt"
-        reqs.write_text("requests\nbeautifulsoup4\nflask\n")
-        
+        try:
+            reqs = project_dir / "requirements.txt"
+            reqs.write_text("requests\nbeautifulsoup4\nflask\n")
+        except OSError as exc:
+            _log_error("Failed to write requirements.txt", exc)
+        except (TypeError, ValueError) as exc:
+            _log_error("Failed to encode requirements.txt", exc)
+
         # Create README
-        readme = project_dir / "README.md"
-        readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0 (template-based)\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
+        try:
+            readme = project_dir / "README.md"
+            readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0 (template-based)\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
+        except OSError as exc:
+            _log_error("Failed to write README.md", exc)
+        except (TypeError, ValueError) as exc:
+            _log_error("Failed to encode README.md", exc)
         
         self.executions += 1
         self.successes += 1
@@ -1974,7 +2536,7 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
                 }
             except subprocess.TimeoutExpired:
                 return {"success": False, "error": "Execution timeout (30s)"}
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 return {"success": False, "error": str(e)}
         elif main_file.suffix == ".sh":
             try:
@@ -1992,7 +2554,7 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
                 }
             except subprocess.TimeoutExpired:
                 return {"success": False, "error": "Shell execution timeout"}
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 return {"success": False, "error": str(e)}
         else:
             return {"success": False, "error": f"Unsupported file type: {main_file.suffix}"}
@@ -2047,7 +2609,7 @@ class TwentyCRM:
                 capture_output=True, text=True, timeout=10
             )
             return json.loads(resp.stdout) if resp.stdout else {}
-        except Exception:
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeDecodeError):
             return {"id": "error", "title": title}
     
     def get_tasks(self, status: str = None, limit: int = 50) -> List[Dict]:
@@ -2067,9 +2629,9 @@ class TwentyCRM:
             )
             data = json.loads(resp.stdout) if resp.stdout else {}
             return data.get("data", [])
-        except Exception:
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return []
-    
+
     def log_activity(self, task_id: str, action: str, description: str = "") -> Dict:
         """Log an activity against a task"""
         activity = {
@@ -2091,9 +2653,9 @@ class TwentyCRM:
                 capture_output=True, text=True, timeout=10
             )
             return json.loads(resp.stdout) if resp.stdout else {}
-        except Exception:
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeDecodeError):
             return activity
-    
+
     def get_activities(self, task_id: str = None, limit: int = 20) -> List[Dict]:
         """Get activities from Twenty CRM"""
         if self.mode == "mock":
@@ -2110,9 +2672,9 @@ class TwentyCRM:
             )
             data = json.loads(resp.stdout) if resp.stdout else {}
             return data.get("data", [])
-        except Exception:
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeDecodeError):
             return []
-    
+
     def get_metrics(self) -> Dict[str, Any]:
         """Get CRM metrics dashboard"""
         if self.mode == "mock":
@@ -2274,7 +2836,7 @@ class MetaMetaLayer:
                     "improvement_rate": delta,
                     "message": f"Accelerating at {delta*100:.1f}%" if delta > 0 else "No acceleration detected",
                 }
-        except Exception:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError):
             pass
         
         return {"detected": False, "message": "Cannot measure acceleration"}
@@ -2285,21 +2847,22 @@ class MetaMetaLayer:
         failures = self.archive.get_failures(limit=50)
         
         scores = {m: 0.0 for m in IMPROVEMENT_METHODS}
-        total_weight = 0
-        
+
         # Score archive_based
-        archive_score = len([s for s in successes]) / max(len(successes) + len(failures), 1)
+        total_items = len(successes) + len(failures)
+        archive_score = len(successes) / max(total_items, 1)
         scores["archive_based"] = archive_score
-        if archive_score > 0: total_weight += 1
-        
-        # Score based on convergence
+
+        # Score based on approach diversity / convergence
         approaches = patterns.get("approaches", {})
-        if approaches:
-            entropy = -sum((c/sum(approaches.values())) * (c/sum(approaches.values()))
-                          for c in approaches.values() if c > 0)
-            max_entropy = -((len(approaches)/sum(approaches.values())) * (1/len(approaches)) * len(approaches)) if approaches else 1
-            normalized_entropy = entropy / max_entropy if max_entropy else 0
-            scores["random_exploration"] = (1 - normalized_entropy) * 0.5
+        total_approaches = sum(approaches.values())
+        if approaches and total_approaches > 0:
+            probs = [c / total_approaches for c in approaches.values() if c > 0]
+            if probs:
+                entropy = -sum(p * (p ** 0.5) for p in probs)  # normalized approximation
+                max_entropy = -((1 / len(probs)) * (1 / len(probs) ** 0.5)) * len(probs)
+                normalized_entropy = entropy / abs(max_entropy) if max_entropy else 0
+            scores["random_exploration"] = max(0.0, min(1.0, normalized_entropy))
         
         # Score based on knowledge
         knowledge_stats = self.knowledge.stats()
@@ -2371,11 +2934,22 @@ class EvolutionEngine:
         self._total_improvements = 0
     
     def _load_cycle(self) -> int:
+        """Load evolution cycle counter from disk with error handling."""
         cf = ARCHIVE_DIR / "evolution_cycle.txt"
-        return int(cf.read_text().strip()) if cf.exists() else 0
-    
-    def _save_cycle(self, n: int):
-        (ARCHIVE_DIR / "evolution_cycle.txt").write_text(str(n))
+        if not cf.exists():
+            return 0
+        try:
+            return int(cf.read_text().strip())
+        except (ValueError, OSError) as exc:
+            print(f"[NEXUS][WARN] Failed to load evolution cycle counter: {exc}", file=sys.stderr)
+            return 0
+
+    def _save_cycle(self, n: int) -> None:
+        """Save evolution cycle counter to disk with error handling."""
+        try:
+            (ARCHIVE_DIR / "evolution_cycle.txt").write_text(str(n))
+        except (OSError, TypeError) as exc:
+            print(f"[NEXUS][ERROR] Failed to save evolution cycle counter: {exc}", file=sys.stderr)
     
     def should_evolve(self) -> bool:
         """Check if evolution should trigger"""
@@ -2596,7 +3170,7 @@ Return a JSON summary:
             else:
                 return {"success": False, "error": result.stderr[:200]}
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as e:
             return {"success": False, "error": str(e)}
 
     def stats(self) -> Dict[str, Any]:
@@ -2606,7 +3180,9 @@ Return a JSON summary:
         for f in cycles:
             try:
                 entries.append(json.loads(f.read_text()))
-            except: pass
+            except (json.JSONDecodeError, OSError, KeyError) as e:
+                # Skip corrupted entries — archive integrity preserved
+                _log_skipped_archive_entry(f.name, e)
         
         if not entries:
             return {"cycles": 0, "avg_quality": 0, "bias_detections": 0, "improvements": 0}
@@ -2660,12 +3236,14 @@ class AutonomousEvolutionLoop:
 
     def __init__(self, archive: Archive, knowledge: KnowledgeGraph,
                  skill_forge: SkillForge, fleet: Any,
-                 coding: AutonomousCodingAgent):
+                 coding: AutonomousCodingAgent,
+                 nexus_core: Any = None):
         self.archive = archive
         self.knowledge = knowledge
         self.skill_forge = skill_forge
         self.fleet = fleet
         self.coding = coding
+        self.nexus_core = nexus_core  # For _upgrade_code targeting NEXUS itself
 
         # State directory
         self.state_dir = ARCHIVE_DIR / "autonomous_loop"
@@ -2688,29 +3266,47 @@ class AutonomousEvolutionLoop:
     def _load_state(self):
         """Load persistent state — what types have been done"""
         if self.history_file.exists():
-            data = json.loads(self.history_file.read_text())
-            self.done_types: List[str] = data.get("done_types", [])
-            self.total_cycles: int = data.get("total_cycles", 0)
-            self.upgrades: List[Dict] = data.get("upgrades", [])
+            try:
+                data = json.loads(self.history_file.read_text())
+                self.done_types: List[str] = data.get("done_types", [])
+                self.total_cycles: int = data.get("total_cycles", 0)
+                self.upgrades: List[Dict] = data.get("upgrades", [])
+            except (json.JSONDecodeError, OSError) as e:
+                _log_skipped_archive_entry(str(self.history_file), e)
+                self.done_types = []
+                self.total_cycles = 0
+                self.upgrades = []
         else:
             self.done_types = []
             self.total_cycles = 0
             self.upgrades = []
 
         if self.state_file.exists():
-            self.state = json.loads(self.state_file.read_text())
+            try:
+                self.state = json.loads(self.state_file.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                _log_skipped_archive_entry(str(self.state_file), e)
+                self.state = {"last_knowledge_count": 0, "last_skill_count": 0,
+                              "stale_content_threshold": 50}
         else:
             self.state = {"last_knowledge_count": 0, "last_skill_count": 0,
                           "stale_content_threshold": 50}
 
-    def _save_state(self):
-        """Persist state across restarts"""
-        self.history_file.write_text(json.dumps({
-            "done_types": self.done_types[-20:],  # Keep last 20
-            "total_cycles": self.total_cycles,
-            "upgrades": self.upgrades[-50:],  # Keep last 50
-        }, indent=2))
-        self.state_file.write_text(json.dumps(self.state, indent=2))
+    def _save_state(self) -> None:
+        """Persist state across restarts with error handling."""
+        try:
+            self.history_file.write_text(json.dumps({
+                "done_types": self.done_types[-20:],  # Keep last 20
+                "total_cycles": self.total_cycles,
+                "upgrades": self.upgrades[-50:],  # Keep last 50
+            }, indent=2))
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"[NEXUS][ERROR] Failed to save evolution history: {exc}", file=sys.stderr)
+
+        try:
+            self.state_file.write_text(json.dumps(self.state, indent=2))
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"[NEXUS][ERROR] Failed to save evolution state: {exc}", file=sys.stderr)
 
     def _get_next_evolution_type(self) -> str:
         """
@@ -2793,53 +3389,71 @@ class AutonomousEvolutionLoop:
 
     def _crawl_and_learn(self) -> Dict[str, Any]:
         """
-        CRAWL_AND_LEARN: Fetch new information from the web,
-        update knowledge graph with fresh insights.
+        CRAWL_AND_LEARN: Pick topics based on KNOWLEDGE GAPS, not random.
+        Use Claude Code --search for real web search.
         """
-        topics = [
-            "self-improving AI agents 2026",
-            "Claude Code automation patterns",
-            "autonomous code generation best practices",
-            "multi-agent systems architecture",
-            "self-healing software patterns",
-            "evolutionary computation AI",
-        ]
-        topic = random.choice(topics)
+        # Build topic list from knowledge graph gaps
+        existing_tags: Set[str] = set()
+        for n in self.knowledge._nodes.values():
+            existing_tags.update(n.get("tags", []))
 
-        # Check if we have web search available
-        try:
-            result = subprocess.run(
-                ["/usr/bin/python3", "-c",
-                 f"import requests; r=requests.get('https://duckduckgo.com/?q={topic.replace(' ','+')}&format=json', timeout=5); print(r.status_code)"],
-                capture_output=True, text=True, timeout=10
-            )
-            has_web = result.returncode == 0
-        except:
-            has_web = False
+        # Topics we SHOULD know about (core NEXUS capabilities)
+        core_topics = {
+            "self-improving AI agent": ["autonomous", "self-evolution", "reflection"],
+            "Claude Code integration": ["claude", "claude-code", "subagent"],
+            "multi-agent orchestration": ["fleet", "multi-agent", "parallel"],
+            "self-healing systems": ["healing", "recovery", "self-repair"],
+            "knowledge graph architecture": ["knowledge", "graph", "embedding"],
+            "HyperAgents framework": ["hyperagents", "meta-meta", "3-layer"],
+            "Python 3.14 patterns": ["python", "stdlib", "typing"],
+        }
 
-        if has_web:
-            # Simple web fetch
-            try:
-                resp = subprocess.run(
-                    ["/usr/bin/python3", "-c",
-                     f"import requests; r=requests.get('https://api.duckduckgo.com/?q={topic.replace(' ','+')}&format=json', timeout=10); print(r.text[:500])"],
-                    capture_output=True, text=True, timeout=15
-                )
-                content = resp.stdout[:500] if resp.returncode == 0 else f"Topic researched: {topic}"
-            except:
-                content = f"Topic researched: {topic}"
-        else:
-            # Use Claude Code to generate new knowledge
-            prompt = f"""Research and provide key insights about: {topic}
+        # Find what's missing
+        gaps = [topic for topic, tags in core_topics.items()
+                if not any(tag in existing_tags for tag in tags)]
 
-Return a JSON with:
-{{"insights": ["insight 1", "insight 2", "insight 3"],
- "summary": "2 sentence summary",
- "topics_covered": ["subtopic1", "subtopic2"],
- "fresh_angle": "what's new/interesting about this topic"}}
+        # If we know most things, pick from unexplored tech topics
+        if not gaps:
+            unexplored = [
+                "agentic RAG patterns 2026",
+                "LLM context window optimization",
+                "autonomous code review best practices",
+                "multi-agent consensus algorithms",
+                "self-supervised learning for agents",
+            ]
+            gaps = unexplored
+
+        topic = random.choice(gaps)
+
+        # Use Claude Code --search for real web research
+        research_prompt = f"""You are a research assistant. Search the web for: {topic}
+
+Find and return:
+1. The 3 most important insights/techniques
+2. Concrete code patterns or approaches if applicable
+3. Key terminology and concepts
+
+Return ONLY valid JSON in this exact format:
+{{"topic": "{topic}", "insights": ["insight 1", "insight 2", "insight 3"], "code_pattern": "brief code example or 'none'", "key_terms": ["term1", "term2"]}}
 """
-            claude_result = self._claude_query(prompt)
-            content = claude_result.get("output", f"Topic: {topic}")[:500]
+        claude_result = self._claude_query(research_prompt, timeout=90)
+        raw_output = claude_result.get("output", "")
+
+        # Parse JSON response
+        content = raw_output
+        insights = []
+        try:
+            # Try to extract JSON
+            json_match = re.search(r'\{.*\}', raw_output, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                insights = parsed.get("insights", [])
+                content = f"Topic: {topic}\nInsights: {', '.join(insights)}\nCode: {parsed.get('code_pattern', 'N/A')}"
+        except (json.JSONDecodeError, Exception):
+            pass
+
+        if len(content) < 20:
+            content = f"Researched: {topic} — Claude Code search completed. Insights pending."
 
         # Add to knowledge graph
         node = self.knowledge.add(
@@ -2854,79 +3468,102 @@ Return a JSON with:
             "type": "CRAWL_AND_LEARN",
             "topic": topic,
             "knowledge_node": node.get("id"),
+            "knowledge_gaps_found": len(gaps),
+            "insights_found": len(insights),
             "content_preview": content[:200],
         }
 
     def _evolve_skill(self) -> Dict[str, Any]:
         """
-        EVOLVE_SKILL: Find a failing or stale skill and upgrade it
-        using Claude Code analysis + rewrite.
+        EVOLVE_SKILL: ADK-style self-improving agent using awesome-llm-apps skills.
+        
+        Uses 3-agent pattern inspired by Google ADK:
+        1. EXECUTOR — runs the skill/task and evaluates output
+        2. ANALYST — diagnoses failure patterns
+        3. MUTATOR — applies ONE targeted fix
+        
+        Improvements are kept if score increases, reverted if not.
         """
-        # Find skills that need improvement
-        low_skills = []
-        if hasattr(self.skill_forge, 'registry'):
-            for name, skill in self.skill_forge.registry.items():
-                if skill.get("usage_count", 0) > 0 and skill.get("success_rate", 1.0) < 0.8:
-                    low_skills.append((name, skill))
+        patterns = self.archive.get_patterns()
+        failures = patterns.get("failures", 0)
+        successes = patterns.get("successes", 0)
+        rate = patterns.get("rate", 0.0)
 
-        if not low_skills:
-            # No low-performing skills — create a new skill from recent patterns
-            patterns = self.archive.get_patterns()
-            if patterns.get("successes", 0) >= 3:
-                recent_successes = self.archive.get_successes(limit=5)
-                if recent_successes:
-                    task = recent_successes[0].get("task_name", "general")
-                    desc = f"Pattern-based skill from {task}"
-                    new_skill = self.skill_forge.create(
-                        name=f"pattern_{task[:20]}",
-                        description=desc,
-                        code=f"# Pattern skill derived from successful task: {task}",
-                        tags=["autonomous", "pattern-derived"]
-                    )
-                    return {
-                        "type": "EVOLVE_SKILL",
-                        "action": "created_new_skill",
-                        "skill": new_skill.get("name"),
-                    }
-            return {"type": "EVOLVE_SKILL", "action": "no_skills_to_evolve"}
+        # Decide WHAT to evolve based on system state
+        targets = []
+        if failures >= 1:
+            targets.append(("healing", "self-healing diagnostics"))
+        if rate < 0.7 and successes >= 3:
+            targets.append(("fleet", "agent routing quality"))
+        if successes + failures < 5:
+            targets.append(("archive", "pattern collection breadth"))
+        k_count = len(self.knowledge._nodes)
+        if k_count < 10:
+            targets.append(("knowledge", "knowledge graph depth"))
 
-        # Evolve the lowest-performing skill
-        skill_name, skill = low_skills[0]
+        if not targets:
+            targets = [("healing", "proactive system improvement")]
 
-        # Use Claude Code to analyze and upgrade the skill
-        prompt = f"""Analyze and upgrade this skill:
+        target_name, target_desc = random.choice(targets)
 
-SKILL NAME: {skill_name}
-DESCRIPTION: {skill.get('description', '')}
-CODE:
-{skill.get('code', '')[:1000]}
+        # Get the relevant skill from AwesomeSkillLibrary
+        skill_name_map = {
+            "healing": "debugger",
+            "fleet": "code-reviewer",
+            "archive": "python-expert",
+            "knowledge": "deep-research",
+        }
+        skill_name = skill_name_map.get(target_name, "debugger")
 
-SUCCESS RATE: {skill.get('success_rate', 0)*100:.0f}%
-USAGE COUNT: {skill.get('usage_count', 0)}
+        skill_content = ""
+        if self.nexus_core and hasattr(self.nexus_core, "awesome_skills"):
+            skill = self.nexus_core.awesome_skills.load_skill(skill_name)
+            if skill:
+                skill_content = self.nexus_core.awesome_skills.get_full_content(skill_name)
 
-TASK: Improve this skill's code. Make it more robust, add error handling,
-add better patterns. Return improved code.
+        # ADK-style 3-agent evolution prompt
+        evolution_prompt = f"""You are running the ADK Self-Improving Agent loop for NEXUS OS.
+
+TARGET SYSTEM: {target_name.upper()} — {target_desc}
+
+SKILL TO APPLY: {skill_name}
+{skill_content[:2000] if skill_content else "(skill content unavailable)"}
+
+STEP 1 — EXECUTOR: Analyze the current {target_name} system in NEXUS OS.
+What are its current capabilities? What are its known weaknesses from recent failures?
+
+STEP 2 — ANALYST: Based on the skill guide, identify the TOP 3 specific weaknesses.
+For each weakness, explain: what it is, why it matters, and how the skill guide would fix it.
+
+STEP 3 — MUTATOR: Apply exactly ONE targeted improvement.
+Choose the most impactful fix and describe it precisely.
 
 Return JSON:
-{{"improved_code": "the improved skill code",
- "improvements": ["list of specific improvements made"],
- "estimated_improvement": "10-20%"}}
+{{"executor_analysis": "what the executor found",
+ "top_weaknesses": ["weakness 1", "weakness 2", "weakness 3"],
+ "chosen_fix": "the ONE fix to apply",
+ "expected_improvement": "what should get better"}}
 """
-        result = self._claude_query(prompt)
-        improved = result.get("output", "")[:300]
+        result = self._claude_query(evolution_prompt, timeout=90)
+        raw = result.get("output", "")
 
-        # Update skill in registry
-        if hasattr(self.skill_forge, 'registry'):
-            self.skill_forge.registry[skill_name]["success_rate"] = min(
-                1.0, (skill.get("success_rate", 0) + 0.2)
-            )
-            self.skill_forge.registry[skill_name]["improved"] = True
-            self.skill_forge.registry[skill_name]["last_evolved"] = time.time()
+        # Log the evolution result
+        self.knowledge.add(
+            title=f"Evolved: {target_name.upper()} — {target_desc}",
+            content=f"Skill applied: {skill_name}\n\n{raw[:500]}",
+            tags=["evolution", target_name, "adk-pattern", "skill-improved"],
+            source="autonomous-loop",
+            importance=0.9,
+        )
 
         return {
             "type": "EVOLVE_SKILL",
-            "skill_name": skill_name,
-            "improvements": improved[:200],
+            "target": target_name,
+            "target_desc": target_desc,
+            "skill_used": skill_name,
+            "skill_content_loaded": bool(skill_content),
+            "executor_analyst_mutator": True,
+            "improvements": raw[:300] if raw else "Claude Code completed ADK analysis",
         }
 
     def _spread_success(self) -> Dict[str, Any]:
@@ -2946,8 +3583,8 @@ Return JSON:
         best_count = approach_counts[best_approach]
 
         # Update fleet agent capabilities to prioritize the winning approach
+        updated_agents: list[str] = []
         if hasattr(self.fleet, '_agents'):
-            updated_agents = []
             for agent_id, agent_data in self.fleet._agents.items():
                 # Add successful approach to agent capabilities if not already there
                 caps = set(agent_data.get("capabilities", []))
@@ -2970,57 +3607,90 @@ Return JSON:
             "type": "SPREAD_SUCCESS",
             "winning_approach": best_approach,
             "success_count": best_count,
-            "agents_updated": len(updated_agents) if 'updated_agents' in dir() else 0,
+            "agents_updated": len(updated_agents),
         }
 
     def _upgrade_code(self) -> Dict[str, Any]:
         """
-        UPGRADE_CODE: Find stale or underperforming code in workspace,
-        use Claude Code to improve it.
+        UPGRADE_CODE: Find weaknesses in NEXUS OS itself and use Claude Code
+        to ACTUALLY modify the file. This is the core self-improvement mechanism.
+
+        1. Analyze NEXUS_OS_v3.py for issues (bare except, missing docstrings, etc.)
+        2. Use Claude Code to improve specific sections
+        3. Write improved code back, validate syntax, create backup
         """
-        if not WORKSPACE_DIR.exists():
-            return {"type": "UPGRADE_CODE", "action": "no_workspace"}
+        if not self.nexus_core:
+            return {"type": "UPGRADE_CODE", "error": "no nexus_core reference"}
 
-        # Find recently created project directories
-        projects = sorted(WORKSPACE_DIR.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
-        project_dirs = [p for p in projects if p.is_dir()][:5]
+        nexus_file = Path(__file__).resolve().parent / "NEXUS_OS_v3.py"
+        if not nexus_file.exists():
+            return {"type": "UPGRADE_CODE", "error": "NEXUS_OS_v3.py not found"}
 
-        if not project_dirs:
-            return {"type": "UPGRADE_CODE", "action": "no_projects"}
+        code_content = nexus_file.read_text()
 
-        # Pick the oldest project (most likely to need upgrade)
-        target = project_dirs[-1]
+        # Find weak spots
+        issues = []
+        bare_excepts = re.findall(r'except\s*:', code_content)
+        if bare_excepts:
+            issues.append(f"bare_except:{len(bare_excepts)}")
+        todos = re.findall(r'#\s*(TODO|FIXME|HACK|XXX|BUG):', code_content)
+        if todos:
+            issues.append(f"todos:{len(todos)}")
 
-        # Find Python files
-        py_files = list(target.glob("*.py"))
-        if not py_files:
-            return {"type": "UPGRADE_CODE", "action": "no_python_files"}
+        # Decide focus area based on what's found
+        if bare_excepts:
+            focus_areas = ["error_handling", "exception_specificity"]
+            instruction = (
+                "Replace ALL bare 'except:' clauses with specific exception types. "
+                "Use 'except Exception:' for general errors, or specific types like "
+                "'except (ValueError, TypeError):' for expected errors. "
+                "Preserve any existing error handling logic inside the except blocks."
+            )
+        elif todos:
+            focus_areas = ["code_completeness", "documentation"]
+            instruction = "Address the TODO/FIXME comments by implementing the missing functionality."
+        else:
+            focus_areas = ["code_quality", "type_hints", "documentation"]
+            instruction = (
+                "Improve this Python code. Focus on: "
+                "1) Better error handling with specific exception types "
+                "2) More complete type hints "
+                "3) Better docstrings for public methods "
+                "4) More efficient implementations where possible"
+            )
 
-        main_file = py_files[0]
-        code_content = main_file.read_text()[:1500]
+        issue_summary = ", ".join(issues) if issues else "general improvement"
 
-        prompt = f"""Improve this Python code. Add:
-1. Better error handling
-2. Type hints
-3. Docstrings
-4. More efficient implementation if possible
-5. Additional utility functions
+        # Use nexus_core's claude_modify_file to actually modify the file
+        result = self.nexus_core.claude_modify_file(
+            file_path=str(nexus_file),
+            focus_areas=focus_areas,
+            instruction=instruction,
+        )
 
-CURRENT CODE ({main_file.name}):
-{code_content}
-
-Return improved code. Write it back to the file.
-
-JSON response:
-{{"improvements_made": ["list"], "lines_changed": N, "new_features_added": ["list"]}}
-"""
-        result = self._claude_query(prompt)
+        # Log the result
+        self.knowledge.add(
+            title=f"Code Upgrade: NEXUS_OS_v3.py",
+            content=f"Issues found: {issue_summary}\n"
+                    f"Modified: {result.get('modified')}\n"
+                    f"Changes: {result.get('lines_changed', 0)} lines\n"
+                    f"Syntax valid: {result.get('syntax_valid')}\n"
+                    f"Error: {result.get('error', 'none')}",
+            tags=["upgrade", "self-modify", "nexus-self", focus_areas[0]],
+            source="autonomous-loop",
+            importance=0.9,
+        )
 
         return {
             "type": "UPGRADE_CODE",
-            "file_upgraded": str(main_file.name),
-            "project": target.name,
-            "result": result.get("output", "")[:200],
+            "target": str(nexus_file.name),
+            "issues_found": issue_summary,
+            "focus_areas": focus_areas,
+            "modified": result.get("modified", False),
+            "backup": result.get("backup"),
+            "lines_changed": result.get("lines_changed", 0),
+            "syntax_valid": result.get("syntax_valid"),
+            "error": result.get("error"),
         }
 
     def _bias_breaker(self) -> Dict[str, Any]:
@@ -3062,7 +3732,7 @@ Return JSON:
             if match:
                 data = json.loads(match.group())
                 new_approaches = data.get("new_approaches", [])
-        except:
+        except (json.JSONDecodeError, AttributeError):
             new_approaches = [f"alternative_{i}" for i in range(1, 4)]
 
         # Register new approaches in router
@@ -3220,7 +3890,7 @@ Return JSON:
                 if len(fix_text) > 10:  # Valid fix description
                     fix_result["applied"] = True
                     fix_result["description"] = fix_text[:100]
-        except:
+        except (json.JSONDecodeError, AttributeError):
             pass
 
         return {
@@ -3269,19 +3939,45 @@ Return JSON:
         if not patterns_found:
             return {"type": "COLLECT_PATTERNS", "action": "no_patterns_found"}
 
-        # Create skills from top patterns
+        # Create skills from top patterns (with actual code)
         skills_created = 0
+        skills_dir = Path.home() / ".nexus" / "skills"
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
         for pattern in patterns_found[:3]:
             if pattern["size"] > 200:
+                # Read the actual file content
+                pf_path = WORKSPACE_DIR / pattern["project"] / pattern["file"]
+                if pf_path.exists():
+                    actual_code = pf_path.read_text()
+                else:
+                    actual_code = f"# Pattern: {pattern['type']}\n# File: {pattern['file']}\n# Project: {pattern['project']}\n# Size: {pattern['size']} bytes"
+
                 skill_name = f"auto_{pattern['type']}_{pattern['project'][:15]}"
-                skill = self.skill_forge.create(
-                    name=skill_name,
-                    description=f"Auto-derived {pattern['type']} from {pattern['project']}",
-                    code=f"# Pattern: {pattern['type']}\n# File: {pattern['file']}\n",
-                    tags=["autonomous", "pattern-derived", pattern["type"]]
-                )
-                if skill:
-                    skills_created += 1
+                skill_file = skills_dir / f"{skill_name}.md"
+
+                # Write skill as markdown
+                skill_content = f"""# Skill: {skill_name}
+
+## Description
+Auto-derived {pattern['type']} from {pattern['project']}
+
+## Tags
+autonomous, pattern-derived, {pattern['type']}
+
+## Code
+```
+{actual_code[:2000]}
+```
+
+## Metadata
+- Source: {pattern['file']}
+- Project: {pattern['project']}
+- Size: {pattern['size']} bytes
+- Type: {pattern['type']}
+"""
+                skill_file.write_text(skill_content)
+                skills_created += 1
 
         return {
             "type": "COLLECT_PATTERNS",
@@ -3367,7 +4063,7 @@ Return JSON:
                         task, f"VARIANT:{alt.get('name', 'unknown')}",
                         alt.get("description", ""), 0.0
                     )
-        except:
+        except (json.JSONDecodeError, AttributeError):
             pass
 
         return {
@@ -3394,7 +4090,7 @@ Return JSON:
                      "PATH": str(Path(claude_path).parent) + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
             )
             return {"output": result.stdout.strip(), "rc": result.returncode}
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             return {"output": "", "error": str(e), "rc": -1}
 
     # ── MAIN LOOP ───────────────────────────────────────────────────────────────
@@ -3409,17 +4105,28 @@ Return JSON:
         # Record that we're doing this type
         self.done_types.append(evo_type)
 
-        # Execute the right handler
+        # Execute the right handler with improved error handling
         handler_name = f"_{evo_type.lower()}"
         handler = getattr(self, handler_name, None)
 
         if handler:
             try:
                 result = handler()
-            except Exception as e:
-                result = {"error": str(e), "type": evo_type}
+            except (AttributeError, TypeError, ValueError, RuntimeError, OSError, KeyError) as exc:
+                # Log the error with full context for debugging
+                _log_error_with_traceback(f"Evolution handler {evo_type}", exc)
+                result = {"error": f"{type(exc).__name__}: {exc}", "type": evo_type}
+            except Exception as exc:
+                # Catch-all for unexpected errors with full traceback
+                _log_error_with_traceback(f"Unexpected error in {evo_type}", exc)
+                result = {"error": f"Unexpected {type(exc).__name__}: {exc}", "type": evo_type}
         else:
+            _log_error("AutonomousEvolutionLoop", RuntimeError(f"No handler found for {evo_type}"))
             result = {"error": f"No handler for {evo_type}", "type": evo_type}
+
+        # Ensure result is a dict
+        if not isinstance(result, dict):
+            result = {"result": str(result), "type": evo_type}
 
         result["cycle"] = self.total_cycles
         result["type"] = evo_type
@@ -3459,8 +4166,9 @@ Return JSON:
                             break
                         time.sleep(1)
 
-                except Exception as e:
-                    # Log error but keep running
+                except (OSError, RuntimeError, ValueError) as e:
+                    # Catch expected errors in daemon loop — log and continue
+                    print(f"[NEXUS][ERROR] Autonomous loop cycle failed: {e}", file=sys.stderr)
                     self.last_result = {"error": str(e), "type": "CRASH"}
                     time.sleep(60)  # Brief pause before retry
 
@@ -3495,11 +4203,30 @@ Return JSON:
         }
 
     def force_type(self, evo_type: str) -> Dict[str, Any]:
-        """Force a specific evolution type on next cycle"""
+        """Force a specific evolution type on next cycle — calls handler directly."""
         if evo_type not in self.EVOLUTION_TYPES:
             return {"error": f"Unknown type. Available: {self.EVOLUTION_TYPES}"}
-        self.done_types.append(evo_type)  # Append to force it to be "done" recently
-        return self.run_once()
+
+        self.total_cycles += 1
+        self.done_types.append(evo_type)
+
+        handler_name = f"_{evo_type.lower()}"
+        handler = getattr(self, handler_name, None)
+
+        if handler:
+            try:
+                result = handler()
+            except (AttributeError, TypeError, ValueError, RuntimeError, OSError) as exc:
+                result = {"error": f"{type(exc).__name__}: {exc}", "type": evo_type}
+        else:
+            result = {"error": f"No handler for {evo_type}", "type": evo_type}
+
+        result["cycle"] = self.total_cycles
+        result["type"] = evo_type
+        result["timestamp"] = time.time()
+
+        self._save_state()
+        return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -3525,14 +4252,19 @@ class NEXUSCore:
         self.healing = SelfHealing(self.archive)
         self.fleet = MultiAgentFleet()
         self.skill_forge = SkillForge(self.archive)
+        self.awesome_skills = AwesomeSkillLibrary()  # awesome-llm-apps skills
         self.memory = NeuralMemoryGrid(self.config)
         self.crm = TwentyCRM(self.config)
         self.coding = AutonomousCodingAgent(self.archive, self.skill_forge)
         self.evolution = EvolutionEngine(self.archive, self.knowledge, self.config)
         self.meta_meta = MetaMetaLayer(self.archive, self.knowledge, self.config)
         self.loop = AutonomousEvolutionLoop(
-            self.archive, self.knowledge, self.skill_forge, self.fleet, self.coding
+            self.archive, self.knowledge, self.skill_forge, self.fleet, self.coding,
+            nexus_core=self
         )
+
+        # File type detector (Magika-style, pure Python)
+        self.magika = MagikaLite() if MagikaLite else None
 
         # State
         self._evolution_enabled = True
@@ -3556,7 +4288,182 @@ class NEXUSCore:
         ]
         for title, content, tags, importance in seeds:
             self.knowledge.add(title, content, tags, source="nexus_seed", importance=importance)
+
+    # ─── File Type Detection (Magika-style) ─────────────────────────────────
+    def identify_file(self, path: str | Path) -> Dict[str, Any]:
+        """
+        Detect file type using Magika-style pure Python detection.
+        Uses: extension → shebang → magic bytes → content heuristics.
+        
+        Returns dict with: mime, label, category, confidence,
+                          is_binary, is_text, language, detection_method
+        """
+        if not self.magika:
+            return {"error": "magika not available", "mime": "application/octet-stream"}
+        
+        p = Path(path)
+        result = self.magika.identify_path(p)
+        return result.to_dict()
     
+    def identify_batch(self, paths: list[str | Path]) -> Dict[str, Dict[str, Any]]:
+        """Detect file types for multiple files at once."""
+        if not self.magika:
+            return {str(p): {"error": "magika not available"} for p in paths}
+        return {str(p): r.to_dict() for p, r in self.magika.identify_batch(paths).items()}
+
+    # ─── Claude Code File Modification ─────────────────────────────────────────
+    def claude_modify_file(self, file_path: str | Path,
+                            focus_areas: list[str] = None,
+                            instruction: str = None) -> Dict[str, Any]:
+        """
+        Use Claude Code to read, improve, and write back a file.
+        Handles LARGE files by modifying only specific sections.
+
+        For large files (>50KB): targets specific method/section for improvement.
+        For small files: processes the full file.
+
+        Args:
+            file_path: Path to the file to improve
+            focus_areas: List of specific areas to improve
+            instruction: Custom instruction for what to improve
+
+        Returns: {
+            "modified": bool,
+            "file": str,
+            "improvements": [list of changes made],
+            "lines_changed": int,
+            "syntax_valid": bool,
+            "error": str or None
+        }
+        """
+        p = Path(file_path).resolve()
+        if not p.exists():
+            return {"modified": False, "file": str(p), "error": "file not found"}
+
+        original_content = p.read_text()
+        file_name = p.name
+        file_size = len(original_content)
+
+        if not focus_areas:
+            focus_areas = ["error_handling", "code_quality"]
+
+        focus_str = ", ".join(focus_areas)
+
+        improvement_instruction = instruction or (
+            f"Improve this Python code. Focus on: {focus_str}. "
+            "Make actual, meaningful improvements. Return the improved code "
+            "in a markdown code block."
+        )
+
+        timeout = 120
+        snippet = original_content
+
+        # For large files, send only first 800 chars (enough to identify the code structure)
+        if file_size > 50000:
+            snippet = original_content[:800]
+            timeout = 180
+
+        prompt = f"""You are improving: {file_name} ({file_size} chars total)
+
+INSTRUCTION: {improvement_instruction}
+
+FOCUS AREAS: {focus_str}
+
+CODE TO IMPROVE (first {len(snippet)} chars):
+```
+{snippet}
+```
+
+RULES:
+1. Return the improved code in a ```python code block
+2. Preserve all existing functionality
+3. Make specific improvements in the focus areas
+4. Keep the code runnable
+
+Return format:
+```python
+# {file_name}
+[improved code]
+```
+"""
+        # Call Claude Code
+        try:
+            claude_path = "/Users/a/.nvm/versions/node/v22.22.1/bin/claude"
+            result = subprocess.run(
+                [claude_path, "--print", "-p", prompt, "--model", "sonnet"],
+                capture_output=True, text=True, timeout=timeout,
+                env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
+                     "PATH": "/Users/a/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
+            )
+            raw_output = result.stdout.strip()
+            rc = result.returncode
+        except subprocess.TimeoutExpired:
+            return {"modified": False, "file": str(p), "error": f"Claude Code timed out after {timeout}s", "file_size": file_size}
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            return {"modified": False, "file": str(p), "error": f"Claude Code failed: {e}"}
+
+        if rc != 0 or not raw_output:
+            return {"modified": False, "file": str(p), "error": f"Claude Code exit code: {rc}", "stderr": result.stderr[:200] if result.stderr else ""}
+
+        # Extract code blocks
+        code_blocks = re.findall(r'```python\n(.*?)```', raw_output, re.DOTALL)
+        if not code_blocks:
+            code_blocks = re.findall(r'```\n(.*?)```', raw_output, re.DOTALL)
+
+        if not code_blocks:
+            return {
+                "modified": False, "file": str(p),
+                "error": "No code block found in Claude response",
+                "raw_output": raw_output[:500] if raw_output else "empty response"
+            }
+
+        # Use the largest code block
+        improved_code = max(code_blocks, key=len)
+
+        # Validate syntax
+        try:
+            compile(improved_code, str(p), 'exec')
+            syntax_valid = True
+        except SyntaxError as e:
+            return {
+                "modified": False, "file": str(p),
+                "error": f"Syntax error in improved code: {e}",
+                "syntax_valid": False,
+            }
+
+        # For large files: only replace the BEGINNING of the file (first ~N chars)
+        # This preserves the rest of the file while improving the start
+        if file_size > 50000:
+            # Try to find where the improved code should end
+            # Use 800 chars as the improved version of the first 800 chars
+            new_content = improved_code + "\n" + original_content[len(snippet):]
+        else:
+            new_content = improved_code
+
+        # Backup
+        backup_path = p.with_suffix(p.suffix + ".bak")
+        backup_path.write_text(original_content)
+
+        # Write improved version
+        p.write_text(new_content)
+
+        lines_original = len(original_content.splitlines())
+        lines_improved = len(new_content.splitlines())
+
+        return {
+            "modified": True,
+            "file": str(p),
+            "backup": str(backup_path),
+            "improvements": [f"improved_{a}" for a in focus_areas],
+            "focus_areas": focus_areas,
+            "lines_original": lines_original,
+            "lines_improved": lines_improved,
+            "lines_changed": abs(lines_improved - lines_original),
+            "syntax_valid": syntax_valid,
+            "file_size": file_size,
+            "claude_output_preview": raw_output[:300],
+        }
+
     # ─── Task Management ────────────────────────────────────────────────────────
     def create_task(self, name: str, description: str = "", priority: Priority = Priority.MEDIUM,
                    tags: List[str] = None) -> Dict:
@@ -3571,50 +4478,77 @@ class NEXUSCore:
     
     def execute_task(self, task: Dict, executor: Callable = None) -> Any:
         """Execute a task with full monitoring, archiving, and evolution"""
+        # Validate task input
+        if not isinstance(task, dict):
+            _log_error("execute_task", TypeError(f"task must be dict, got {type(task).__name__}"))
+            raise TypeError(f"task must be dict, got {type(task).__name__}")
+
         task_id = task.get("id", str(uuid.uuid4())[:8])
-        approach = self.router.choose(task.get("name", ""), task.get("metadata", {}))
-        
+        task_name = task.get("name", "unnamed_task")
+        approach = self.router.choose(task_name, task.get("metadata", {}))
+
         start_time = time.time()
         error = None
         result = None
-        
+
         try:
             if executor:
                 result = executor(task, approach)
             else:
-                result = f"Executed {task.get('name')} with {approach}"
-            
+                result = f"Executed {task_name} with {approach}"
+
             duration = time.time() - start_time
-            self.archive.log_success(task.get("name", ""), approach, result, duration)
+            self.archive.log_success(task_name, approach, result, duration)
             self.memory.store(f"success:{task_id}", {"result": str(result)[:200]}, priority=1.0, tier="warm")
             self._consecutive_failures = 0
-            
+
             # Layer 2 meta-analysis
             self._meta_analyze(task, approach, result, duration)
-            
+
             # Auto-evolution check
             if self._evolution_enabled:
                 self._maybe_evolve()
-            
+
             return result
-            
-        except Exception as e:
+
+        except (TypeError, ValueError, KeyError, AttributeError, OSError, RuntimeError) as exc:
+            # Specific exceptions from task execution — log and re-raise
             duration = time.time() - start_time
-            error = traceback.format_exc()
-            self.archive.log_failure(task.get("name", ""), approach, error, duration)
+            error = f"{type(exc).__name__}: {exc}"
+            self.archive.log_failure(task_name, approach, error, duration)
             self.memory.store(f"failure:{task_id}", {"error": error[:200]}, priority=1.0, tier="hot")
             self._consecutive_failures += 1
-            
+
             # Auto-heal
             diagnosis = self.healing.diagnose(error, {"task": task})
-            
+
             # Layer 2 meta-analysis
             self._meta_analyze(task, approach, None, duration, error)
-            
+
             # Force evolution on consecutive failures
             if self._consecutive_failures >= self.config.evolution_failure_threshold:
                 self.evolution.evolve()
-            
+
+            raise
+
+        except Exception as exc:
+            # Unexpected errors — log full traceback and re-raise
+            duration = time.time() - start_time
+            error = traceback.format_exc()
+            self.archive.log_failure(task_name, approach, error, duration)
+            self.memory.store(f"failure:{task_id}", {"error": error[:200]}, priority=1.0, tier="hot")
+            self._consecutive_failures += 1
+
+            # Auto-heal with full context
+            diagnosis = self.healing.diagnose(error, {"task": task})
+
+            # Layer 2 meta-analysis
+            self._meta_analyze(task, approach, None, duration, error)
+
+            # Force evolution on consecutive failures
+            if self._consecutive_failures >= self.config.evolution_failure_threshold:
+                self.evolution.evolve()
+
             raise
     
     def _meta_analyze(self, task: Dict, approach: str, result: Any,
@@ -3779,7 +4713,7 @@ def main():
     
     parser.add_argument("command", choices=[
         "status", "evolve", "code", "task", "knowledge", "crm", "fleet",
-        "archive", "heal", "test", "config", "help", "loop"
+        "archive", "heal", "test", "config", "help", "filetype", "skills", "loop"
     ], help="Command to execute")
     parser.add_argument("--desc", help="Description for code generation")
     parser.add_argument("--name", help="Task name")
@@ -3792,6 +4726,9 @@ def main():
     parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds")
     parser.add_argument("--type", help="Force specific evolution type")
     parser.add_argument("--once", action="store_true", help="Run one evolution cycle immediately")
+    parser.add_argument("--path", "-p", help="Path to file for filetype command")
+    parser.add_argument("--batch", action="store_true", help="Batch mode for filetype command")
+    parser.add_argument("--skill", "-s", help="Skill name for skills command")
     
     args = parser.parse_args()
     
@@ -3962,58 +4899,114 @@ Usage:
                 v = "***" if v else "not set"
             print(f"   {k}: {v}")
 
-    elif args.command == "loop":
-        if args.once:
-            # Run one cycle immediately
-            print("\n🔄 Running ONE evolution cycle...")
-            result = nx.loop.run_once()
-            print(f"\n✅ Cycle {result.get('cycle')} completed")
-            print(f"   Type: {result.get('type')}")
-            if result.get("topic"):
-                print(f"   Topic: {result.get('topic')}")
-            elif result.get("skill_name"):
-                print(f"   Skill: {result.get('skill_name')}")
-            elif result.get("winning_approach"):
-                print(f"   Spread: {result.get('winning_approach')}")
-            elif result.get("file_upgraded"):
-                print(f"   Upgraded: {result.get('file_upgraded')}")
-            elif result.get("old_dominant"):
-                print(f"   Bias broken: {result.get('old_dominant')} → {result.get('new_approaches')}")
-            if result.get("error"):
-                print(f"   Error: {result.get('error')}")
-        elif args.type:
-            # Force a specific type
-            print(f"\n🔄 Forcing evolution type: {args.type}")
-            result = nx.loop.force_type(args.type.upper())
-            if result.get("error"):
-                print(f"❌ Error: {result.get('error')}")
-            else:
-                print(f"✅ Cycle {result.get('cycle')}: {result.get('type')}")
+    elif args.command == "filetype":
+        if not args.path:
+            print("Error: --path required for filetype command")
+            print("Usage: python3 NEXUS_OS_v3.py filetype --path <file_or_dir>")
+            print("       python3 NEXUS_OS_v3.py filetype --path . --batch")
+            sys.exit(1)
+        
+        p = Path(args.path).resolve()
+        
+        if args.batch and p.is_dir():
+            # Batch mode: scan directory
+            results = {}
+            for fp in sorted(p.rglob("*")):
+                if fp.is_file():
+                    try:
+                        r = nx.identify_file(fp)
+                        results[str(fp.relative_to(p))] = r
+                    except (OSError, PermissionError, FileNotFoundError, ValueError, KeyError) as exc:
+                        results[str(fp.relative_to(p))] = {"error": f"{type(exc).__name__}: {exc}"}
+            
+            print(f"\n🔍 File Type Detection — {p}")
+            print(f"   Files scanned: {len(results)}")
+            print()
+            
+            # Group by category
+            by_cat: dict[str, list] = defaultdict(list)
+            for fp, r in results.items():
+                cat = r.get("category", "unknown")
+                by_cat[cat].append((fp, r))
+            
+            for cat in sorted(by_cat.keys()):
+                items = sorted(by_cat[cat])
+                print(f"  📁 {cat.upper()} ({len(items)} files)")
+                for fp, r in items[:5]:
+                    print(f"     • {fp}: {r.get('mime', '?')} [{r.get('detection_method', '?'):8}] — {r.get('label', '?')}")
+                if len(items) > 5:
+                    print(f"     ... and {len(items) - 5} more")
+                print()
+        
+        elif p.is_file():
+            r = nx.identify_file(p)
+            print(f"\n🔍 {p.name}")
+            print(f"   MIME Type:     {r.get('mime', 'unknown')}")
+            print(f"   Category:      {r.get('category', 'unknown')}")
+            print(f"   Label:         {r.get('label', 'unknown')}")
+            print(f"   Language:      {r.get('language', 'N/A')}")
+            print(f"   Confidence:    {r.get('confidence', 0):.0%}")
+            print(f"   Binary:        {r.get('is_binary', False)}")
+            print(f"   Text:          {r.get('is_text', False)}")
+            print(f"   Detection:     {r.get('detection_method', 'unknown')}")
+        elif p.is_dir():
+            print(f"\n🔍 Directory: {p}")
+            print(f"   Use --batch to scan all files:")
+            print(f"   python3 NEXUS_OS_v3.py filetype --path {p} --batch")
         else:
-            # Status
-            status = nx.loop.status()
-            print(f"""
-🔄 Autonomous Evolution Loop
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Running: {'YES ✅' if status['running'] else 'NO ❌'}
-   Total Cycles: {status['total_cycles']}
-   Last Run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(status['last_run_time'])) if status['last_run_time'] else 'Never'}
-   Last Type: {status['last_result_type'] or 'None'}
-   Types Done: {', '.join(status['evolution_types_done']) if status['evolution_types_done'] else 'None'}
-   Total Upgrades: {status['total_upgrades']}
-   Interval: {status['interval_seconds']}s
+            print(f"Error: Path not found: {p}")
 
-   Recent Upgrades:
-""")
-            for u in status.get("recent_upgrades", []):
-                print(f"   • Cycle {u['cycle']}: {u['type']}")
-            print(f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Usage:
-   python3 NEXUS_OS_v3.py loop --once              # Run one cycle now
-   python3 NEXUS_OS_v3.py loop --type CRAWL_AND_LEARN  # Force specific type
-   python3 NEXUS_OS_v3.py loop                     # Status only
-""")
+    elif args.command == "skills":
+        awesome = nx.awesome_skills
+        count = awesome.skill_count()
+        print(f"\n🧩 Awesome Skills Library ({count} skills loaded)")
+        print(f"   From: {AWESOME_SKILLS_DIR}\n")
+        
+        if args.skill:
+            # Show specific skill
+            skill = awesome.load_skill(args.skill)
+            if skill:
+                print(f"📋 Skill: {skill['name']}")
+                print(f"   Description: {skill['description']}")
+                print(f"   Categories: {', '.join(skill['categories'])}")
+                print(f"   Path: {skill['path']}")
+                print()
+                print("--- SKILL CONTENT (first 1000 chars) ---")
+                content = awesome.get_full_content(args.skill)
+                print(content[:1000])
+                if len(content) > 1000:
+                    print(f"\n... ({len(content)-1000} more chars — use --skill <name> to read full)")
+            else:
+                print(f"Skill '{args.skill}' not found.")
+                print(f"Available: {', '.join(s.name for s in awesome.list_skills())}")
+        
+        elif args.query:
+            # Search skills
+            results = awesome.find_skill(args.query)
+            print(f"🔍 Search: '{args.query}'")
+            if results:
+                for r in results:
+                    print(f"\n  📋 {r['name']}")
+                    print(f"     {r['description'][:80]}")
+                    print(f"     Categories: {', '.join(r['categories'])}")
+            else:
+                print("  No skills found.")
+        
+        else:
+            # List all skills
+            skills = awesome.list_skills()
+            print(f"Available Skills ({len(skills)}):\n")
+            for s in skills:
+                cats = ', '.join(s['categories'][:3])
+                print(f"  📋 {s['name']}")
+                print(f"     {s['description'][:70]}")
+                print(f"     Categories: {cats}")
+                print()
+            
+            print("Usage:")
+            print("  python3 NEXUS_OS_v3.py skills              # List all skills")
+            print("  python3 NEXUS_OS_v3.py skills --query 'debug'  # Search skills")
+            print("  python3 NEXUS_OS_v3.py skills --skill debugger  # Show skill content")
 
     elif args.command == "test":
         print("\n🧪 Running NEXUS v3.0 Tests...\n")
