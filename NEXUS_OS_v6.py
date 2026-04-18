@@ -530,16 +530,13 @@ class NEXUSOSv6:
 
     def _evolve_skill(self) -> dict:
         """V6: EVOLVE_SKILL using ADK pattern."""
-        # Pick a skill to improve
         skills = self.nexus_core.awesome_skills.list_skills()
         if not skills:
             return {"target": "no_skills", "improvements": [], "error": "No skills available"}
 
         skill = skills[self.store.get_cycle() % len(skills)]
         skill_name = skill['name'] if isinstance(skill, dict) else skill
-        result.target = skill_name
 
-        # Load skill content
         skill_data = self.nexus_core.awesome_skills.get_skill(skill_name)
         if not skill_data:
             return {"target": skill_name, "error": "Skill not found"}
@@ -560,7 +557,7 @@ class NEXUSOSv6:
         return {
             "type": "EVOLVE_SKILL",
             "target": skill_name,
-            "improvements": mutated.get("improvements", []),
+            "improvements": mutated.get("improvements", []) if isinstance(mutated, dict) else [],
             "research": research_result.get("insights", []),
             "insights": research_result.get("insights", [])[:3],
         }
