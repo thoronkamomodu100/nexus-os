@@ -440,6 +440,7 @@ class NEXUSOSv6:
             else:
                 ev_result = self._evolve_crawl_and_learn()
 
+            # Propagate from ev_result
             result.target = ev_result.get("target", ev_result.get("topic", ""))
             result.research_results = ev_result
 
@@ -531,16 +532,17 @@ class NEXUSOSv6:
     def _evolve_skill(self) -> dict:
         """V6: EVOLVE_SKILL using ADK pattern."""
         # Pick a skill to improve
-        available_skills = list(self.nexus_core.awesome_skills.list_skills().keys())
-        if not available_skills:
+        skills = self.nexus_core.awesome_skills.list_skills()
+        if not skills:
             return {"target": "no_skills", "improvements": [], "error": "No skills available"}
 
-        skill_name = available_skills[self.store.get_cycle() % len(available_skills)]
+        skill = skills[self.store.get_cycle() % len(skills)]
+        skill_name = skill['name'] if isinstance(skill, dict) else skill
         result.target = skill_name
 
         # Load skill content
-        skill = self.nexus_core.awesome_skills.get_skill(skill_name)
-        if not skill:
+        skill_data = self.nexus_core.awesome_skills.get_skill(skill_name)
+        if not skill_data:
             return {"target": skill_name, "error": "Skill not found"}
 
         print(f"  🎓 Evolving skill: {skill_name}")
@@ -549,7 +551,7 @@ class NEXUSOSv6:
         executor_notes = f"Analyzing skill: {skill_name}"
         analyst_notes = f"Identified improvements for {skill_name}"
         mutated = self.nexus_core.awesome_skills.evolve_skill(
-            skill_name, skill, {"executor_notes": executor_notes, "analyst_notes": analyst_notes}
+            skill_name, skill_data, {"executor_notes": executor_notes, "analyst_notes": analyst_notes}
         )
 
         # Run research on the topic
