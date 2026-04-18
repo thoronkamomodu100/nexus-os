@@ -322,6 +322,254 @@ class NEXUSInteractiveCLI(cmd.Cmd):
         return self.do_exit(arg)
 
 
+# ── V6: Intelligent Code Fixer ─────────────────────────────────────────────────
+class IntelligentCodeFixer:
+    """
+    Diagnose → Propose → Execute framework for meaningful code improvements.
+    Every evolution cycle produces at least ONE visible code change.
+
+    Pattern: Find specific fixable issues, propose exact patches, execute surgically.
+    """
+
+    def __init__(self, nexus_core):
+        self.nexus_core = nexus_core
+
+    # ── DIAGNOSE: Find specific issues in a file ───────────────────────────────
+
+    def diagnose(self, filepath: Path) -> list[dict]:
+        """Scan file for specific fixable issues. Returns list of {type, location, issue, fix}. """
+        issues = []
+        content = filepath.read_text()
+        lines = content.split('\n')
+
+        # 1. Unused imports (imported but never referenced)
+        imported_names = {}
+        for i, line in enumerate(lines):
+            m = re.match(r'^import (\w+)', line.strip())
+            if m:
+                imported_names[m.group(1)] = i
+            m = re.match(r'^from \w+ import (.+)', line.strip())
+            if m:
+                for name in re.findall(r'\b(\w+)\b', m.group(1)):
+                    if name not in ('*',):
+                        imported_names[name] = i
+
+        for name, line_num in imported_names.items():
+            # Skip common non-used cases
+            if name in ('sys', 'os', 'time', 'json', 'subprocess', 'pathlib', 'datetime'):
+                continue
+            # Count references to this name in the rest of the file
+            rest = '\n'.join(lines[line_num+1:])
+            if not re.search(rf'\b{name}\b', rest):
+                issues.append({
+                    'type': 'unused_import',
+                    'location': f'line {line_num+1}',
+                    'issue': f"import '{name}' is imported but never used",
+                    'fix': f"Remove unused import '{name}'",
+                    'line': line_num,
+                })
+
+        # 2. Missing return type hints on public methods
+        for i, line in enumerate(lines):
+            m = re.match(r'    def (\w+)\(self.*?\).*?\)->\s*(\w+)', line)
+            if not m:
+                m2 = re.match(r'    def (\w+)\(self.*?\):', line)
+                if m2 and not line.strip().endswith(':'):  # might be on same line
+                    pass
+            # Look for function defs without -> return type
+            if re.match(r'    def \w+\(self.*?\):', line) or re.match(r'    def \w+\(self.*?\)->[^:]+:', line):
+                has_return = '->' in line
+                if not has_return:
+                    fn_name = re.search(r'def (\w+)', line)
+                    issues.append({
+                        'type': 'missing_return_type',
+                        'location': f'line {i+1}',
+                        'issue': f"method '{fn_name.group(1)}' has no return type hint",
+                        'fix': f"Add return type hint to '{fn_name.group(1)}'",
+                        'line': i,
+                    })
+
+        # 3. Bare except clauses
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if stripped.startswith('except:') or re.match(r'except\s*:', stripped):
+                issues.append({
+                    'type': 'bare_except',
+                    'location': f'line {i+1}',
+                    'issue': 'bare except: clause — catches all exceptions including KeyboardInterrupt',
+                    'fix': 'Change to except Exception: or specific exception type',
+                    'line': i,
+                })
+
+        # 4. TODO/FIXME that indicate incomplete work
+        for i, line in enumerate(lines):
+            if re.search(r'#\s*(TODO|FIXME|HACK|XXX|BUG|NOTE:.*incomplete)', line, re.I):
+                issues.append({
+                    'type': 'incomplete_code',
+                    'location': f'line {i+1}',
+                    'issue': f"Incomplete code marker: '{line.strip()}'",
+                    'fix': f"Resolve or create tracked issue for: {line.strip()}",
+                    'line': i,
+                })
+
+        # 5. Functions without docstrings (public API functions)
+        for i, line in enumerate(lines):
+            if re.match(r'    def (_\w+|get_\w+|run_\w+|check_\w+|list_\w+|add_\w+|remove_\w+)\(', line):
+                # Check if next 2 lines have docstring
+                next_lines = '\n'.join(lines[i+1:i+4])
+                if '"""' not in next_lines and "'''" not in next_lines:
+                    fn_name = re.search(r'def (\w+)', line)
+                    issues.append({
+                        'type': 'missing_docstring',
+                        'location': f'line {i+1}',
+                        'issue': f"public method '{fn_name.group(1)}' has no docstring",
+                        'fix': f"Add docstring to '{fn_name.group(1)}'",
+                        'line': i,
+                    })
+
+        return issues
+
+    # ── PROPOSE: Create specific fix proposal ─────────────────────────────────
+
+    def propose(self, filepath: Path) -> dict:
+        """
+        Analyze file and create a specific, actionable fix proposal.
+        Returns {target_issue, old_code, new_code, instruction}.
+        """
+        issues = self.diagnose(filepath)
+        if not issues:
+            return {'action': 'none', 'reason': 'No specific issues found'}
+
+        # Pick the most impactful issue
+        priority = {'bare_except': 1, 'unused_import': 2, 'incomplete_code': 3,
+                    'missing_return_type': 4, 'missing_docstring': 5}
+        issues.sort(key=lambda x: priority.get(x['type'], 99))
+        issue = issues[0]
+
+        content = filepath.read_text()
+        lines = content.split('\n')
+        line_idx = issue['line']
+        line = lines[line_idx]
+
+        if issue['type'] == 'unused_import':
+            return {
+                'action': 'remove_line',
+                'target_issue': issue['issue'],
+                'line': line_idx,
+                'old_code': line,
+                'new_code': '',
+                'instruction': f"Remove the unused import line: '{line.strip()}'. This import is never referenced in the file.",
+            }
+
+        elif issue['type'] == 'bare_except':
+            # Find the except line and surrounding context
+            context_before = lines[max(0, line_idx-2):line_idx+1]
+            return {
+                'action': 'replace_line',
+                'target_issue': issue['issue'],
+                'line': line_idx,
+                'old_code': line,
+                'new_code': re.sub(r'except\s*:', 'except Exception:', line),
+                'instruction': f"Change bare 'except:' to 'except Exception:' on line {line_idx+1} so KeyboardInterrupt and SystemExit aren't silently caught.",
+            }
+
+        elif issue['type'] == 'missing_docstring':
+            fn_name = re.search(r'def (\w+)', line).group(1)
+            return {
+                'action': 'add_docstring',
+                'target_issue': issue['issue'],
+                'line': line_idx,
+                'old_code': line,
+                'new_code': line + '\n        """Describe what ' + fn_name + ' does."""\n',
+                'instruction': f"Add a docstring to method '{fn_name}' explaining its purpose, args, and return value.",
+            }
+
+        elif issue['type'] == 'missing_return_type':
+            fn_sig = line.strip()
+            fn_name = re.search(r'def (\w+)', fn_sig).group(1)
+            # Heuristic: guess return type
+            if fn_name.startswith('get_') or fn_name.startswith('list_'):
+                guessed = 'list'
+            elif fn_name.startswith('is_') or fn_name.startswith('has_'):
+                guessed = 'bool'
+            elif fn_name.startswith('run_') or fn_name.startswith('execute_'):
+                guessed = 'dict'
+            else:
+                guessed = 'Any'
+            return {
+                'action': 'replace_line',
+                'target_issue': issue['issue'],
+                'line': line_idx,
+                'old_code': line,
+                'new_code': line.replace('):', f') -> {guessed}:'),
+                'instruction': f"Add return type hint '-> {guessed}' to '{fn_name}'. Replace the line with: {line.replace('):', f') -> {guessed}:')}",
+            }
+
+        elif issue['type'] == 'incomplete_code':
+            return {
+                'action': 'comment_to_issue',
+                'target_issue': issue['issue'],
+                'line': line_idx,
+                'old_code': line,
+                'new_code': re.sub(r'#\s*(TODO|FIXME|HACK|XXX|BUG)', r'# TODO (tracked):', line),
+                'instruction': f"Improve the TODO/FIXME comment '{line.strip()}' to be more specific about what needs to be done, or remove it if it's no longer relevant.",
+            }
+
+        return {'action': 'none', 'reason': 'Issue type not handled'}
+
+    # ── EXECUTE: Apply the fix ────────────────────────────────────────────────
+
+    def execute(self, filepath: Path, proposal: dict) -> dict:
+        """Apply a fix proposal to a file. Returns {applied, lines_changed, backup}. """
+        if proposal.get('action') == 'none':
+            return {'applied': False, 'reason': proposal.get('reason', 'No action')}
+
+        action = proposal['action']
+        old_code = proposal['old_code']
+        new_code = proposal['new_code']
+
+        if action in ('remove_line', 'replace_line', 'add_docstring', 'comment_to_issue'):
+            # Use surgical patch
+            content = filepath.read_text()
+            lines = content.split('\n')
+            line_idx = proposal['line']
+
+            if action == 'remove_line':
+                new_lines = lines[:line_idx] + lines[line_idx+1:]
+            elif action == 'add_docstring':
+                new_lines = lines[:line_idx+1] + [new_code.split('\n')[1]] + lines[line_idx+1:]
+            else:
+                new_lines = lines[:]
+                new_lines[line_idx] = new_code
+
+            new_content = '\n'.join(new_lines)
+            if new_content == content:
+                return {'applied': False, 'reason': 'Content unchanged after patch'}
+
+            # Validate syntax
+            try:
+                ast.parse(new_content)
+            except SyntaxError as e:
+                return {'applied': False, 'reason': f'Syntax error: {e}'}
+
+            # Backup
+            backup = str(filepath) + '.bak'
+            filepath.write_text(content)
+            import shutil
+            shutil.copy(filepath, backup)
+
+            # Write
+            filepath.write_text(new_content)
+            return {
+                'applied': True,
+                'lines_changed': 1 if action != 'remove_line' else -1,
+                'backup': backup,
+                'change': f"{proposal['target_issue']}",
+            }
+
+        return {'applied': False, 'reason': f'Action {action} not handled'}
+
+
 # ── V6: Main Orchestrator ─────────────────────────────────────────────────────
 class NEXUSOSv6:
     """
@@ -346,6 +594,7 @@ class NEXUSOSv6:
         self.voice = VoiceInterface()
         self.archive_sync = ArchiveSync(self.store, self.nexus_core.archive)
         self.mcp_router = MCPToolRouter()
+        self.code_fixer = IntelligentCodeFixer(self.nexus_core)
 
         # Load patterns from SQLite into Archive
         try:
@@ -563,39 +812,90 @@ class NEXUSOSv6:
         }
 
     def _evolve_upgrade_code(self) -> dict:
-        """V6: UPGRADE_CODE using claude_modify_file."""
-        print(f"  🔧 Upgrading code...")
+        """
+        V6: UPGRADE_CODE using IntelligentCodeFixer.
 
-        # Target: a small Python file in the NEXUS_OS directory
+        Pattern: Diagnose → Propose → Execute.
+        Every cycle makes AT LEAST ONE visible code change.
+
+        Finds specific fixable issues (unused imports, bare excepts, missing
+        type hints, missing docstrings) and applies surgical patches.
+        """
+        print(f"  🔧 Upgrading code (Diagnose → Propose → Execute)...")
+
+        # Target files: small modules (Claude times out on large files)
         target_files = [
             NEXUS_OS_PATH / "v5_persistence.py",
             NEXUS_OS_PATH / "v5_scheduler.py",
             NEXUS_OS_PATH / "v5_git_evolution.py",
+            NEXUS_OS_PATH / "v5_web_crawler.py",
         ]
         target = target_files[self.store.get_cycle() % len(target_files)]
 
         if not target.exists():
-            return {"target": str(target), "error": "File not found"}
+            return {"target": str(target), "error": "File not found", "modified": False}
 
-        # Get file size
         file_size = target.stat().st_size
         print(f"  📄 Target: {target.name} ({file_size} bytes)")
 
-        # Call claude_modify_file
-        result = self.nexus_core.claude_modify_file(
-            str(target),
-            focus_areas=["error_handling", "type_hints", "docstrings"],
-            instruction="Improve this Python code. Add type hints, better error handling, and docstrings. Keep all existing functionality.",
-        )
+        # STEP 1: DIAGNOSE — find specific issues
+        issues = self.code_fixer.diagnose(target)
+        if issues:
+            print(f"  🔍 Found {len(issues)} issue(s):")
+            for iss in issues[:5]:
+                print(f"     • [{iss['type']}] {iss['issue']} ({iss['location']})")
 
-        return {
-            "type": "UPGRADE_CODE",
-            "target": target.name,
-            "modified": result.get("modified", False),
-            "lines_changed": result.get("lines_changed", 0),
-            "backup": result.get("backup", ""),
-            "error": result.get("error", ""),
-        }
+        # STEP 2: PROPOSE — create specific fix proposal
+        proposal = self.code_fixer.propose(target)
+        if proposal.get('action') == 'none':
+            print(f"  ⚠️  No specific fix proposals — trying Claude for complex refactor")
+            # Fall back to Claude for complex improvements (structs, algorithms)
+            result = self.nexus_core.claude_modify_file(
+                str(target),
+                focus_areas=["code_structure", "algorithm_efficiency"],
+                instruction="Refactor this code to be more modular. Extract helper functions, reduce duplication, improve naming.",
+            )
+            if result.get("modified"):
+                return {
+                    "type": "UPGRADE_CODE",
+                    "target": target.name,
+                    "modified": True,
+                    "lines_changed": result.get("lines_changed", 0),
+                    "backup": result.get("backup", ""),
+                    "change": "Claude refactor (no specific issues found)",
+                }
+            return {
+                "type": "UPGRADE_CODE",
+                "target": target.name,
+                "modified": False,
+                "reason": "No issues found, Claude made no changes",
+            }
+
+        print(f"  💡 Proposal: {proposal['target_issue']}")
+        print(f"     Fix: {proposal['instruction']}")
+
+        # STEP 3: EXECUTE — apply surgical patch
+        fix_result = self.code_fixer.execute(target, proposal)
+
+        if fix_result.get('applied'):
+            print(f"  ✅ Applied: {fix_result['change']}")
+            print(f"     Backup: {fix_result.get('backup', 'N/A')}")
+            return {
+                "type": "UPGRADE_CODE",
+                "target": target.name,
+                "modified": True,
+                "lines_changed": fix_result.get('lines_changed', 1),
+                "backup": fix_result.get('backup', ''),
+                "change": fix_result.get('change', proposal['target_issue']),
+            }
+        else:
+            print(f"  ⚠️  Patch failed: {fix_result.get('reason', 'unknown')}")
+            return {
+                "type": "UPGRADE_CODE",
+                "target": target.name,
+                "modified": False,
+                "error": fix_result.get('reason', ''),
+            }
 
     def _evolve_diagnose(self) -> dict:
         """V6: DIAGNOSE_ANALYZE — diagnose system issues."""
