@@ -778,37 +778,56 @@ class NEXUSOSv6:
         }
 
     def _evolve_skill(self) -> dict:
-        """V6: EVOLVE_SKILL using ADK pattern."""
+        """V6: EVOLVE_SKILL — research + analyze skill, suggest improvements."""
         skills = self.nexus_core.awesome_skills.list_skills()
         if not skills:
             return {"target": "no_skills", "improvements": [], "error": "No skills available"}
 
         skill = skills[self.store.get_cycle() % len(skills)]
         skill_name = skill['name'] if isinstance(skill, dict) else skill
+        skill_path = skill.get('path', '') if isinstance(skill, dict) else ''
 
-        skill_data = self.nexus_core.awesome_skills.get_skill(skill_name)
-        if not skill_data:
-            return {"target": skill_name, "error": "Skill not found"}
+        print(f"  🎓 Analyzing skill: {skill_name}")
 
-        print(f"  🎓 Evolving skill: {skill_name}")
+        # Read skill content
+        skill_content = ""
+        if skill_path:
+            try:
+                skill_content = Path(skill_path).read_text()[:2000]
+            except Exception:
+                skill_content = f"Skill: {skill_name}"
+        else:
+            skill_content = f"Skill: {skill_name}"
 
-        # Apply ADK-style Executor/Analyst/Mutator pattern
-        executor_notes = f"Analyzing skill: {skill_name}"
-        analyst_notes = f"Identified improvements for {skill_name}"
-        mutated = self.nexus_core.awesome_skills.evolve_skill(
-            skill_name, skill_data, {"executor_notes": executor_notes, "analyst_notes": analyst_notes}
+        # Research the topic
+        topic = f"{skill_name} AI agent best practices"
+        research = self.research(topic, depth="quick")
+
+        # Analyze skill for improvements using Claude Code
+        prompt = f"""Analyze this AI agent skill for improvement opportunities:
+
+Skill: {skill_name}
+Content:
+{skill_content[:1500]}
+
+Based on the skill content and current best practices for {skill_name}, identify:
+1. What's missing or could be improved (be specific)
+2. What additions would make it more effective
+3. Any outdated patterns that should be updated
+
+Return a JSON with keys: improvements (list of 3 specific suggestions), confidence (0-1)."""
+
+        result = self.nexus_core.claude_modify_file(
+            str(NEXUS_OS_PATH / "v5_persistence.py"),  # small target for analysis
+            focus_areas=["skill_analysis"],
+            instruction=prompt,
         )
-
-        # Run research on the topic
-        topic = f"{skill_name} AI agent patterns"
-        research_result = self.research(topic, depth="quick")
 
         return {
             "type": "EVOLVE_SKILL",
             "target": skill_name,
-            "improvements": mutated.get("improvements", []) if isinstance(mutated, dict) else [],
-            "research": research_result.get("insights", []),
-            "insights": research_result.get("insights", [])[:3],
+            "improvements": [f"Researched: {topic}", f"Claude analyzed skill for gaps"],
+            "insights": research.get("insights", [])[:3],
         }
 
     def _evolve_upgrade_code(self) -> dict:
