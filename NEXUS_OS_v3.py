@@ -1,17 +1,27 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 """
-NEXUS OS v3.0 — Autonomous AI Operating System
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                                                                                      ║
+║   ███╗   ██╗███████╗ ██████╗ ███╗   ██╗    ██╗     ██╗██╗  ██╗ ██████╗ ██████╗   ║
+║   ████╗  ██║██╔════╝██╔═══██╗████╗  ██║    ██║     ██║██║ ██╔╝██╔═══██╗██╔══██╗  ║
+║   ██╔██╗ ██║█████╗  ██║   ██║██╔██╗ ██║    ██║     ██║█████╔╝ ██║   ██║██████╔╝  ║
+║   ██║╚██╗██║██╔══╝  ██║   ██║██║╚██╗██║    ██║     ██║██╔═██╗ ██║   ██║██╔══██╗  ║
+║   ██║ ╚████║███████╗╚██████╔╝██║ ╚████║    ███████╗██║██║  ██╗╚██████╔╝██║  ██║  ║
+║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝  ║
+║                                                                                      ║
 ║   Autonomous AI Operating System v3.0                                                ║
 ║   Self-Evolving • Self-Healing • Self-Aware • GitHub-Ready                           ║
+║                                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
-Error Handling Standards:
-    - All exception handlers use specific exception types (no bare except:)
-    - Common types: OSError, ValueError, KeyError, AttributeError, TypeError,
-      json.JSONDecodeError, subprocess.TimeoutExpired, ImportError
-    - Error context is logged before re-raising
-    - Transient failures have retry/backoff logic
+NEXUS OS is an autonomous AI operating system that improves itself through:
+  - HyperAgents 3-Layer Architecture (Task → Meta → Meta-Meta)
+  - Every action archived as reusable stepping stones
+  - Bias detection with forced alternative exploration
+  - Self-healing with root cause analysis
+  - Multi-agent fleet orchestration
+  - Twenty CRM integration
+  - Autonomous coding agent
 
 Usage:
     python3 NEXUS_OS_v3.py status
@@ -27,9 +37,6 @@ Repository: https://github.com/nexus-os/nexus
 """
 
 from __future__ import annotations
-
-import functools
-import logging as _logging
 
 import json
 import os
@@ -59,81 +66,6 @@ except ImportError:
     FileTypeResult = None  # type: ignore
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# IMPROVED ERROR HANDLING UTILITIES
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-def retry_on_exception(
-    max_attempts: int = 3,
-    delay: float = 1.0,
-    backoff: float = 2.0,
-    exceptions: tuple = (OSError, IOError, ConnectionError)
-):
-    """
-    Decorator that retries a function on transient failures with exponential backoff.
-
-    Args:
-        max_attempts: Maximum number of retry attempts
-        delay: Initial delay between retries in seconds
-        backoff: Multiplier for delay after each retry
-        exceptions: Tuple of exception types to catch and retry
-
-    Returns:
-        Decorated function with retry logic
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            current_delay = delay
-            last_exception = None
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as exc:
-                    last_exception = exc
-                    if attempt == max_attempts:
-                        break
-                    _log_error(f"Retry {attempt}/{max_attempts} for {func.__name__}", exc)
-                    time.sleep(current_delay)
-                    current_delay *= backoff
-            _log_error(f"All {max_attempts} retries exhausted for {func.__name__}", last_exception)
-            raise last_exception
-        return wrapper
-    return decorator
-
-
-def validate_input(**validators: Callable) -> Callable:
-    """
-    Decorator that validates function arguments against provided validator functions.
-
-    Args:
-        validators: Map of parameter names to validator callables that return
-                    (is_valid: bool, error_message: str)
-
-    Example:
-        @validate_input(name=lambda v: (isinstance(v, str) and len(v) > 0, "name must be non-empty string"))
-        def process(name: str): ...
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            # Bind arguments to parameter names
-            import inspect
-            sig = inspect.signature(func)
-            bound = sig.bind(*args, **kwargs)
-            bound.apply_defaults()
-
-            for param_name, validator in validators.items():
-                if param_name in bound.arguments:
-                    value = bound.arguments[param_name]
-                    is_valid, error_msg = validator(value)
-                    if not is_valid:
-                        raise ValueError(f"Invalid argument '{param_name}': {error_msg}")
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════
 # VERSION & PATHS
 # ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -146,7 +78,10 @@ CONFIG_FILE = NEXUS_HOME / "config.json"
 
 for _d in [NEXUS_HOME, ARCHIVE_DIR, SKILLS_DIR, WORKSPACE_DIR,
            ARCHIVE_DIR / "evolution", ARCHIVE_DIR / "warnings"]:
-    _d.mkdir(parents=True, exist_ok=True)
+    try:
+        _d.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OSError(f"Cannot create directory {_d}: {e}") from None
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # DATACLASSES — Using make_dataclass for Python 3.14 compat
@@ -315,23 +250,17 @@ class NEXUSConfig:
     
     @classmethod
     def load(cls) -> "NEXUSConfig":
-        """Load configuration from CONFIG_FILE, returning defaults on error."""
         if CONFIG_FILE.exists():
             try:
                 data = json.loads(CONFIG_FILE.read_text())
                 return cls(**{k: v for k, v in data.items() if hasattr(cls, k)})
-            except (json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
-                print(f"[NEXUS][WARN] Config load failed ({type(exc).__name__}): "
-                      f"using defaults. Config file: {CONFIG_FILE}", file=sys.stderr)
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                pass
         return cls()
-
-    def save(self) -> None:
-        """Save configuration to CONFIG_FILE."""
-        try:
-            data = {k: v for k, v in asdict(self).items()}
-            CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-        except (OSError, TypeError, ValueError) as exc:
-            print(f"[NEXUS][ERROR] Config save failed: {exc}", file=sys.stderr)
+    
+    def save(self):
+        data = {k: v for k, v in asdict(self).items()}
+        CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # ARCHIVE (STEPPING STONES)
@@ -342,76 +271,6 @@ def _log_skipped_archive_entry(filename: str, exc: Exception) -> None:
     print(f"[NEXUS][WARN] Skipped corrupted archive entry '{filename}': {exc}", file=sys.stderr)
 
 
-def _log_error(ctx: str, exc: Exception, re_raise: bool = False) -> None:
-    """
-    Standardized error logging with context and optional re-raise.
-
-    Args:
-        ctx: Human-readable context describing where the error occurred.
-        exc: The exception that was caught.
-        re_raise: If True, re-raises the exception after logging.
-    """
-    exc_type = type(exc).__name__
-    exc_msg = str(exc) if exc else "Unknown error"
-    print(f"[NEXUS][ERROR] {ctx} | {exc_type}: {exc_msg}", file=sys.stderr)
-    if re_raise:
-        raise exc
-
-
-def _log_error_with_traceback(ctx: str, exc: Exception, logger: _logging.Logger = None) -> None:
-    """
-    Enhanced error logging that includes full traceback for debugging.
-
-    Args:
-        ctx: Human-readable context describing where the error occurred.
-        exc: The exception that was caught.
-        logger: Optional logger instance for structured logging.
-    """
-    exc_type = type(exc).__name__
-    exc_msg = str(exc) if exc else "Unknown error"
-    error_msg = f"[NEXUS][ERROR] {ctx} | {exc_type}: {exc_msg}"
-    tb_msg = f"[NEXUS][TRACE] {traceback.format_exc()}"
-
-    if logger:
-        logger.error(error_msg)
-        logger.debug(tb_msg)
-    else:
-        print(error_msg, file=sys.stderr)
-        print(tb_msg, file=sys.stderr)
-
-
-def safe_execute(
-    default_return: Any = None,
-    exceptions: tuple = (Exception,),
-    log_errors: bool = True,
-    ctx: str = ""
-) -> Callable:
-    """
-    Decorator that provides safe execution with configurable error handling.
-
-    Args:
-        default_return: Value to return on exception
-        exceptions: Tuple of exception types to catch
-        log_errors: Whether to log errors
-        ctx: Context string for error messages
-
-    Returns:
-        Decorated function that catches exceptions gracefully
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except exceptions as exc:
-                if log_errors:
-                    error_ctx = ctx or f"in {func.__name__}"
-                    _log_error(error_ctx, exc)
-                return default_return
-        return wrapper
-    return decorator
-
-
 def _safe_json_load(path: Path) -> Optional[Dict[str, Any]]:
     """Safely load a JSON file, returning None on error with logging."""
     try:
@@ -419,110 +278,6 @@ def _safe_json_load(path: Path) -> Optional[Dict[str, Any]]:
     except (json.JSONDecodeError, OSError) as e:
         _log_skipped_archive_entry(str(path), e)
         return None
-
-
-def _safe_json_save(path: Path, data: Any, indent: int = 2) -> bool:
-    """
-    Safely write data as JSON to a file.
-
-    Returns:
-        True on success, False on any error. Errors are logged but not raised.
-    """
-    try:
-        path.write_text(json.dumps(data, indent=indent, ensure_ascii=False))
-        return True
-    except (OSError, TypeError, ValueError) as exc:
-        _log_error(f"Failed to write JSON file {path}", exc)
-        return False
-
-
-def _parse_claude_json_response(output: str, key_hint: str = None) -> Optional[Dict[str, Any]]:
-    """
-    Robustly extract and parse a JSON object from Claude Code output.
-
-    Handles cases where JSON is:
-    - Wrapped in markdown code blocks
-    - Buried inside a larger text response
-    - Malformed with trailing commas or newlines
-
-    Args:
-        output: Raw string output from Claude Code.
-        key_hint: Optional string hint for locating the JSON block
-                  (e.g. "files" to find {"files": [...]}). If None, finds any JSON object.
-
-    Returns:
-        Parsed dict on success, None on any failure.
-    """
-    if not output or not output.strip():
-        return None
-
-    # Strategy 1: Try direct parse (already well-formed JSON)
-    try:
-        return json.loads(output.strip())
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    # Strategy 2: Strip markdown code fences
-    text = re.sub(r'^```(?:json|python)?\s*', '', output.strip(), flags=re.MULTILINE)
-    text = re.sub(r'\s*```$', '', text)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 3: Find first JSON object using balanced brace scan
-    json_match = _find_balanced_json(output, key_hint)
-    if json_match:
-        try:
-            return json.loads(json_match)
-        except json.JSONDecodeError:
-            pass
-
-    return None
-
-
-def _find_balanced_json(text: str, key_hint: str = None) -> Optional[str]:
-    """
-    Extract the first complete JSON object from text.
-
-    Balances braces to find the true end of nested objects,
-    avoiding false matches from partial JSON fragments.
-
-    Args:
-        text: Text containing JSON somewhere inside it.
-        key_hint: If provided, finds the substring starting at the key_hint
-                  (e.g. key_hint="files" finds {"files": [...]})
-    """
-    if key_hint:
-        # Find the position of the key hint
-        pos = text.find(f'"{key_hint}"')
-        if pos == -1:
-            # Try unquoted key
-            pos = text.find(key_hint)
-        if pos == -1:
-            return None
-        # Search backward for the opening brace
-        start = text.rfind('{', 0, pos + len(key_hint))
-        if start == -1:
-            return None
-    else:
-        # Find first opening brace
-        start = text.find('{')
-        if start == -1:
-            return None
-
-    # Balance braces from start to find the closing brace
-    depth = 0
-    for i in range(start, len(text)):
-        ch = text[i]
-        if ch == '{':
-            depth += 1
-        elif ch == '}':
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-
-    return None
 
 
 def _run_claude(
@@ -572,22 +327,11 @@ class Archive:
         self._cache_ttl = 10.0
     
     def _load_counter(self) -> int:
-        """Load archive counter from disk with error handling."""
         cf = ARCHIVE_DIR / "counter.txt"
-        if not cf.exists():
-            return 0
-        try:
-            return int(cf.read_text().strip())
-        except (ValueError, OSError) as exc:
-            print(f"[NEXUS][WARN] Failed to load archive counter: {exc}", file=sys.stderr)
-            return 0
-
-    def _save_counter(self, n: int) -> None:
-        """Save archive counter to disk with error handling."""
-        try:
-            (ARCHIVE_DIR / "counter.txt").write_text(str(n))
-        except (OSError, TypeError) as exc:
-            print(f"[NEXUS][ERROR] Failed to save archive counter: {exc}", file=sys.stderr)
+        return int(cf.read_text().strip()) if cf.exists() else 0
+    
+    def _save_counter(self, n: int):
+        (ARCHIVE_DIR / "counter.txt").write_text(str(n))
     
     def _cache_invalidated(self) -> bool:
         return time.time() - self._cache_time > self._cache_ttl
@@ -660,25 +404,20 @@ class Archive:
                 "lessons": lessons,
             }
             path = ARCHIVE_DIR / f"{nid}.json"
-            try:
-                path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
-            except OSError as exc:
-                _log_error(f"Failed to write archive entry {nid}", exc)
-            except (TypeError, ValueError) as exc:
-                _log_error(f"Failed to serialize archive entry {nid}", exc)
+            path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
             self._save_counter(self._counter)
             self._cache_time = 0  # Invalidate cache
             return nid
-
+    
     def log_failure(self, task_name: str, approach: str, error: str = "",
                    duration: float = 0.0, metadata: Dict = None) -> str:
         with self._lock:
             self._counter += 1
             nid = f"failure_{self._counter:05d}"
-
+            
             rc = self._diagnose_root_cause(error)
             suggestions = self._suggest_next_approaches(approach, rc)
-
+            
             entry = {
                 "type": "failure", "id": nid,
                 "task_name": task_name, "approach": approach,
@@ -687,12 +426,7 @@ class Archive:
                 "root_cause": rc, "next_approaches": suggestions,
             }
             path = ARCHIVE_DIR / f"{nid}.json"
-            try:
-                path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
-            except OSError as exc:
-                _log_error(f"Failed to write archive entry {nid}", exc)
-            except (TypeError, ValueError) as exc:
-                _log_error(f"Failed to serialize archive entry {nid}", exc)
+            path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
             self._save_counter(self._counter)
             self._cache_time = 0
             return nid
@@ -1171,16 +905,7 @@ class MultiAgentFleet:
         Each agent type has a specialized prompt for their domain.
         This makes the fleet actually DO work, not just route tasks.
         """
-        # Validate inputs
-        if not isinstance(agent_id, str) or not agent_id:
-            _log_error("MultiAgentFleet.execute", ValueError("agent_id must be non-empty string"))
-            return {"success": False, "error": "agent_id must be non-empty string"}
-        if not isinstance(task_description, str):
-            _log_error("MultiAgentFleet.execute", ValueError(f"task_description must be str, got {type(task_description).__name__}"))
-            return {"success": False, "error": "task_description must be string"}
-
         if agent_id not in self._agents:
-            _log_error("MultiAgentFleet.execute", KeyError(f"Agent '{agent_id}' not found"))
             return {"success": False, "error": f"Agent '{agent_id}' not found"}
 
         agent = self._agents[agent_id]
@@ -1335,13 +1060,9 @@ class SkillForge:
                 # Skip corrupted entries — archive integrity preserved
                 _log_skipped_archive_entry(f.name, e)
     
-    def _save(self, skill: Dict) -> None:
-        """Save skill to disk with error handling."""
+    def _save(self, skill: Dict):
         path = SKILLS_DIR / f"{skill['name']}.json"
-        try:
-            path.write_text(json.dumps(skill, indent=2, ensure_ascii=False))
-        except (OSError, TypeError, ValueError) as exc:
-            print(f"[NEXUS][ERROR] Failed to save skill '{skill.get('name', '?')}': {exc}", file=sys.stderr)
+        path.write_text(json.dumps(skill, indent=2, ensure_ascii=False))
     
     def create(self, name: str, description: str, code: str,
                trigger_keywords: List[str] = None,
@@ -1552,31 +1273,13 @@ class NeuralMemoryGrid:
         self._lock = threading.Lock()
         self._session_id = str(uuid.uuid4())[:8]
     
-    def store(self, key: str, value: Any, priority: float = 1.0, tier: str = "hot") -> None:
-        """Store a value in memory with error handling and input validation."""
-        # Validate inputs using improved validation
-        if not isinstance(key, str):
-            _log_error("NeuralMemoryGrid.store", ValueError(f"Key must be str, got {type(key).__name__}"))
-            return
-        if not key:
-            _log_error("NeuralMemoryGrid.store", ValueError("Key cannot be empty string"))
-            return
-        if tier not in ("hot", "warm", "cold"):
-            _log_error("NeuralMemoryGrid.store", ValueError(f"Invalid tier '{tier}', defaulting to 'hot'"))
-            tier = "hot"
-        if not isinstance(priority, (int, float)) or not (0.0 <= priority <= 1.0):
-            _log_error("NeuralMemoryGrid.store", ValueError(f"Priority must be float 0.0-1.0, got {priority}"))
-            priority = max(0.0, min(1.0, float(priority)))
-
+    def store(self, key: str, value: Any, priority: float = 1.0, tier: str = "hot"):
         with self._lock:
             entry = {"value": value, "priority": priority, "timestamp": time.time(),
                      "access_count": 0, "session": self._session_id}
-            if tier == "hot":
-                self._hot[key] = entry
-            elif tier == "warm":
-                self._warm[key] = entry
-            else:
-                self._cold[key] = entry
+            if tier == "hot": self._hot[key] = entry
+            elif tier == "warm": self._warm[key] = entry
+            else: self._cold[key] = entry
             self._priority[key] = priority
     
     def retrieve(self, key: str) -> Optional[Any]:
@@ -1888,7 +1591,7 @@ if __name__ == "__main__":
                     env={**os.environ}
                 )
                 self._claude_available = result.returncode == 0
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
                 self._claude_available = False
                 self._claude_path = "claude"
         return self._claude_available
@@ -2092,7 +1795,7 @@ Return JSON first, then all code in separate code blocks."""
                 except json.JSONDecodeError:
                     pass
 
-            # Write each code block to a file (individual file writes are non-fatal)
+            # Write each code block to a file
             created_files = []
             filespecs = json_summary.get("files", [])
 
@@ -2110,29 +1813,17 @@ Return JSON first, then all code in separate code blocks."""
                 # Clean filename
                 filename = re.sub(r'[^\w\-_.]', '_', filename)
 
-                # Write the file — per-file error handling so one bad block can't
-                # corrupt the entire project. Failures are logged but execution
-                # continues with the remaining files.
-                try:
-                    filepath = project_dir / filename
-                    filepath.write_text(code)
-                    created_files.append(filename)
-                except OSError as exc:
-                    _log_error(f"Failed to write generated file '{filename}'", exc)
-                except (TypeError, ValueError) as exc:
-                    _log_error(f"Failed to encode generated file '{filename}'", exc)
+                # Write the file
+                filepath = project_dir / filename
+                filepath.write_text(code)
+                created_files.append(filename)
 
             # If no files created from code blocks, try to extract just one
             if not created_files and output.strip():
                 # Last resort: write the whole output as main file
-                try:
-                    main_file = project_dir / f"main.{ext}"
-                    main_file.write_text(output.strip())
-                    created_files.append(f"main.{ext}")
-                except OSError as exc:
-                    _log_error(f"Failed to write main file 'main.{ext}'", exc)
-                except (TypeError, ValueError) as exc:
-                    _log_error(f"Failed to encode main file 'main.{ext}'", exc)
+                main_file = project_dir / f"main.{ext}"
+                main_file.write_text(output.strip())
+                created_files.append(f"main.{ext}")
 
             # Verify syntax for Python files
             syntax_ok = True
@@ -2309,14 +2000,9 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
                     filename = f"fixed_{i+1}{primary_ext}"
 
                 filename = re.sub(r'[^\w\-_.]', '_', filename)
-                try:
-                    filepath = project_dir / filename
-                    filepath.write_text(code)
-                    fixed_files.append(filename)
-                except OSError as exc:
-                    _log_error(f"Failed to write fixed file '{filename}'", exc)
-                except (TypeError, ValueError) as exc:
-                    _log_error(f"Failed to encode fixed file '{filename}'", exc)
+                filepath = project_dir / filename
+                filepath.write_text(code)
+                fixed_files.append(filename)
 
             # Verify syntax
             syntax_ok = True
@@ -2368,33 +2054,18 @@ IMPORTANT: Use the SAME filenames. Do not rename files."""
         template = self.TEMPLATES.get(template_key, self.TEMPLATES["cli_tool"])
         filename = template["file"]
         
-        # Write the main file (template-based, per-file errors non-fatal)
+        # Write the main file
         code = template["template"].replace("{{", "{").replace("}}", "}")
-        try:
-            main_file = project_dir / filename
-            main_file.write_text(code)
-        except OSError as exc:
-            _log_error(f"Failed to write template main file '{filename}'", exc)
-        except (TypeError, ValueError) as exc:
-            _log_error(f"Failed to encode template main file '{filename}'", exc)
-
+        main_file = project_dir / filename
+        main_file.write_text(code)
+        
         # Create requirements.txt
-        try:
-            reqs = project_dir / "requirements.txt"
-            reqs.write_text("requests\nbeautifulsoup4\nflask\n")
-        except OSError as exc:
-            _log_error("Failed to write requirements.txt", exc)
-        except (TypeError, ValueError) as exc:
-            _log_error("Failed to encode requirements.txt", exc)
-
+        reqs = project_dir / "requirements.txt"
+        reqs.write_text("requests\nbeautifulsoup4\nflask\n")
+        
         # Create README
-        try:
-            readme = project_dir / "README.md"
-            readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0 (template-based)\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
-        except OSError as exc:
-            _log_error("Failed to write README.md", exc)
-        except (TypeError, ValueError) as exc:
-            _log_error("Failed to encode README.md", exc)
+        readme = project_dir / "README.md"
+        readme.write_text(f"# {project_name}\n\nGenerated by NEXUS OS v3.0 (template-based)\n\n## Setup\n\n```bash\npip install -r requirements.txt\npython {filename}\n```\n")
         
         self.executions += 1
         self.successes += 1
@@ -2609,7 +2280,7 @@ class TwentyCRM:
                 capture_output=True, text=True, timeout=10
             )
             return json.loads(resp.stdout) if resp.stdout else {}
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeDecodeError):
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return {"id": "error", "title": title}
     
     def get_tasks(self, status: str = None, limit: int = 50) -> List[Dict]:
@@ -2653,7 +2324,7 @@ class TwentyCRM:
                 capture_output=True, text=True, timeout=10
             )
             return json.loads(resp.stdout) if resp.stdout else {}
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeDecodeError):
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return activity
 
     def get_activities(self, task_id: str = None, limit: int = 20) -> List[Dict]:
@@ -2672,7 +2343,7 @@ class TwentyCRM:
             )
             data = json.loads(resp.stdout) if resp.stdout else {}
             return data.get("data", [])
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeDecodeError):
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return []
 
     def get_metrics(self) -> Dict[str, Any]:
@@ -2934,22 +2605,11 @@ class EvolutionEngine:
         self._total_improvements = 0
     
     def _load_cycle(self) -> int:
-        """Load evolution cycle counter from disk with error handling."""
         cf = ARCHIVE_DIR / "evolution_cycle.txt"
-        if not cf.exists():
-            return 0
-        try:
-            return int(cf.read_text().strip())
-        except (ValueError, OSError) as exc:
-            print(f"[NEXUS][WARN] Failed to load evolution cycle counter: {exc}", file=sys.stderr)
-            return 0
-
-    def _save_cycle(self, n: int) -> None:
-        """Save evolution cycle counter to disk with error handling."""
-        try:
-            (ARCHIVE_DIR / "evolution_cycle.txt").write_text(str(n))
-        except (OSError, TypeError) as exc:
-            print(f"[NEXUS][ERROR] Failed to save evolution cycle counter: {exc}", file=sys.stderr)
+        return int(cf.read_text().strip()) if cf.exists() else 0
+    
+    def _save_cycle(self, n: int):
+        (ARCHIVE_DIR / "evolution_cycle.txt").write_text(str(n))
     
     def should_evolve(self) -> bool:
         """Check if evolution should trigger"""
@@ -3292,21 +2952,14 @@ class AutonomousEvolutionLoop:
             self.state = {"last_knowledge_count": 0, "last_skill_count": 0,
                           "stale_content_threshold": 50}
 
-    def _save_state(self) -> None:
-        """Persist state across restarts with error handling."""
-        try:
-            self.history_file.write_text(json.dumps({
-                "done_types": self.done_types[-20:],  # Keep last 20
-                "total_cycles": self.total_cycles,
-                "upgrades": self.upgrades[-50:],  # Keep last 50
-            }, indent=2))
-        except (OSError, TypeError, ValueError) as exc:
-            print(f"[NEXUS][ERROR] Failed to save evolution history: {exc}", file=sys.stderr)
-
-        try:
-            self.state_file.write_text(json.dumps(self.state, indent=2))
-        except (OSError, TypeError, ValueError) as exc:
-            print(f"[NEXUS][ERROR] Failed to save evolution state: {exc}", file=sys.stderr)
+    def _save_state(self):
+        """Persist state across restarts"""
+        self.history_file.write_text(json.dumps({
+            "done_types": self.done_types[-20:],  # Keep last 20
+            "total_cycles": self.total_cycles,
+            "upgrades": self.upgrades[-50:],  # Keep last 50
+        }, indent=2))
+        self.state_file.write_text(json.dumps(self.state, indent=2))
 
     def _get_next_evolution_type(self) -> str:
         """
@@ -4105,28 +3758,17 @@ Return JSON:
         # Record that we're doing this type
         self.done_types.append(evo_type)
 
-        # Execute the right handler with improved error handling
+        # Execute the right handler
         handler_name = f"_{evo_type.lower()}"
         handler = getattr(self, handler_name, None)
 
         if handler:
             try:
                 result = handler()
-            except (AttributeError, TypeError, ValueError, RuntimeError, OSError, KeyError) as exc:
-                # Log the error with full context for debugging
-                _log_error_with_traceback(f"Evolution handler {evo_type}", exc)
-                result = {"error": f"{type(exc).__name__}: {exc}", "type": evo_type}
-            except Exception as exc:
-                # Catch-all for unexpected errors with full traceback
-                _log_error_with_traceback(f"Unexpected error in {evo_type}", exc)
-                result = {"error": f"Unexpected {type(exc).__name__}: {exc}", "type": evo_type}
+            except (AttributeError, ValueError, TypeError) as e:
+                result = {"error": str(e), "type": evo_type}
         else:
-            _log_error("AutonomousEvolutionLoop", RuntimeError(f"No handler found for {evo_type}"))
             result = {"error": f"No handler for {evo_type}", "type": evo_type}
-
-        # Ensure result is a dict
-        if not isinstance(result, dict):
-            result = {"result": str(result), "type": evo_type}
 
         result["cycle"] = self.total_cycles
         result["type"] = evo_type
@@ -4206,25 +3848,25 @@ Return JSON:
         """Force a specific evolution type on next cycle — calls handler directly."""
         if evo_type not in self.EVOLUTION_TYPES:
             return {"error": f"Unknown type. Available: {self.EVOLUTION_TYPES}"}
-
+        
         self.total_cycles += 1
         self.done_types.append(evo_type)
-
+        
         handler_name = f"_{evo_type.lower()}"
         handler = getattr(self, handler_name, None)
-
+        
         if handler:
             try:
                 result = handler()
-            except (AttributeError, TypeError, ValueError, RuntimeError, OSError) as exc:
-                result = {"error": f"{type(exc).__name__}: {exc}", "type": evo_type}
+            except Exception as e:
+                result = {"error": str(e), "type": evo_type}
         else:
             result = {"error": f"No handler for {evo_type}", "type": evo_type}
-
+        
         result["cycle"] = self.total_cycles
         result["type"] = evo_type
         result["timestamp"] = time.time()
-
+        
         self._save_state()
         return result
 
@@ -4311,160 +3953,143 @@ class NEXUSCore:
             return {str(p): {"error": "magika not available"} for p in paths}
         return {str(p): r.to_dict() for p, r in self.magika.identify_batch(paths).items()}
 
-    # ─── Claude Code File Modification ─────────────────────────────────────────
+# ─── Claude Code File Modification ─────────────────────────────────────────
     def claude_modify_file(self, file_path: str | Path,
                             focus_areas: list[str] = None,
                             instruction: str = None) -> Dict[str, Any]:
-        """
-        Use Claude Code to read, improve, and write back a file.
-        Handles LARGE files by modifying only specific sections.
-
-        For large files (>50KB): targets specific method/section for improvement.
-        For small files: processes the full file.
-
-        Args:
-            file_path: Path to the file to improve
-            focus_areas: List of specific areas to improve
-            instruction: Custom instruction for what to improve
-
-        Returns: {
-            "modified": bool,
-            "file": str,
-            "improvements": [list of changes made],
-            "lines_changed": int,
-            "syntax_valid": bool,
-            "error": str or None
-        }
-        """
+        """Use Claude Code --print to get improved code, extract block, apply."""
+        import re as _re
         p = Path(file_path).resolve()
         if not p.exists():
             return {"modified": False, "file": str(p), "error": "file not found"}
-
         original_content = p.read_text()
         file_name = p.name
         file_size = len(original_content)
-
         if not focus_areas:
             focus_areas = ["error_handling", "code_quality"]
-
         focus_str = ", ".join(focus_areas)
-
         improvement_instruction = instruction or (
             f"Improve this Python code. Focus on: {focus_str}. "
-            "Make actual, meaningful improvements. Return the improved code "
-            "in a markdown code block."
+            "Make actual improvements. Keep all existing functionality."
         )
-
-        timeout = 120
-        snippet = original_content
-
-        # For large files, send only first 800 chars (enough to identify the code structure)
-        if file_size > 50000:
-            snippet = original_content[:800]
-            timeout = 180
-
-        prompt = f"""You are improving: {file_name} ({file_size} chars total)
-
-INSTRUCTION: {improvement_instruction}
-
-FOCUS AREAS: {focus_str}
-
-CODE TO IMPROVE (first {len(snippet)} chars):
-```
-{snippet}
-```
-
-RULES:
-1. Return the improved code in a ```python code block
-2. Preserve all existing functionality
-3. Make specific improvements in the focus areas
-4. Keep the code runnable
-
-Return format:
-```python
-# {file_name}
-[improved code]
-```
-"""
-        # Call Claude Code
+        claude_path = "/Users/a/.nvm/versions/node/v22.22.1/bin/claude"
+        if file_size <= 50000:
+            snippet = original_content
+            grave = chr(96)
+            prompt = (
+                "Improve the following Python file. Return ONLY the improved code "
+                "in a code block starting with triple backticks python. "
+                "No explanation, no markdown besides the code block.\n\n"
+                f"INSTRUCTION: {improvement_instruction}\n\n"
+                f"FILE: {file_name}\n"
+                f"{grave}{grave}{grave}\n"
+                f"{original_content}\n"
+                f"{grave}{grave}{grave}"
+            )
+            timeout = 60
+        else:
+            snippet = original_content[:5000]
+            grave = chr(96)
+            prompt = (
+                "Analyze this Python code and make ONE small, targeted improvement. "
+                "Return ONLY the improved snippet in a triple-backtick python code block. "
+                "No explanation.\n\n"
+                f"INSTRUCTION: {improvement_instruction}\n"
+                f"Focus: {focus_str}\n\n"
+                f"FILE: {file_name} (first 5000 of {file_size} chars)\n"
+                f"{grave}{grave}{grave}\n"
+                f"{snippet}\n"
+                f"{grave}{grave}{grave}"
+            )
+            timeout = 90
+        env = {
+            **os.environ,
+            "CLAUDE_CODE_SIMPLE": "1",
+            "PATH": "/Users/a/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        }
         try:
-            claude_path = "/Users/a/.nvm/versions/node/v22.22.1/bin/claude"
             result = subprocess.run(
                 [claude_path, "--print", "-p", prompt, "--model", "sonnet"],
-                capture_output=True, text=True, timeout=timeout,
-                env={**os.environ, "CLAUDE_CODE_SIMPLE": "1",
-                     "PATH": "/Users/a/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
+                capture_output=True, text=True, timeout=timeout, env=env,
             )
-            raw_output = result.stdout.strip()
             rc = result.returncode
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
         except subprocess.TimeoutExpired:
-            return {"modified": False, "file": str(p), "error": f"Claude Code timed out after {timeout}s", "file_size": file_size}
-        except (OSError, subprocess.SubprocessError, ValueError) as e:
-            return {"modified": False, "file": str(p), "error": f"Claude Code failed: {e}"}
-
-        if rc != 0 or not raw_output:
-            return {"modified": False, "file": str(p), "error": f"Claude Code exit code: {rc}", "stderr": result.stderr[:200] if result.stderr else ""}
-
-        # Extract code blocks
-        code_blocks = re.findall(r'```python\n(.*?)```', raw_output, re.DOTALL)
-        if not code_blocks:
-            code_blocks = re.findall(r'```\n(.*?)```', raw_output, re.DOTALL)
-
-        if not code_blocks:
             return {
                 "modified": False, "file": str(p),
-                "error": "No code block found in Claude response",
-                "raw_output": raw_output[:500] if raw_output else "empty response"
+                "error": f"Claude timed out after {timeout}s",
+                "file_size": file_size,
             }
-
-        # Use the largest code block
-        improved_code = max(code_blocks, key=len)
-
-        # Validate syntax
+        except Exception as e:
+            return {
+                "modified": False, "file": str(p),
+                "error": f"Claude failed: {e}",
+            }
+        if rc != 0:
+            return {
+                "modified": False, "file": str(p),
+                "error": f"Claude exit code: {rc}",
+                "stderr": stderr[:300],
+                "stdout": stdout[:300],
+            }
+        # Extract code block: triple-backtick python NEWLINE ... triple-backtick
+        grave = chr(96)
+        cb_start = grave + grave + grave + "python\n"
+        cb_end = grave + grave + grave
+        if cb_start not in stdout:
+            return {
+                "modified": False, "file": str(p),
+                "error": "No python code block in Claude output",
+                "stdout": stdout[:500],
+            }
+        start_idx = stdout.index(cb_start) + len(cb_start)
+        end_idx = stdout.index(cb_end, start_idx)
+        improved_code = stdout[start_idx:end_idx]
+        if file_size <= 50000:
+            new_content = improved_code
+        else:
+            if original_content.startswith(snippet):
+                new_content = improved_code + original_content[len(snippet):]
+            else:
+                idx = original_content.find(snippet[:200])
+                if idx >= 0:
+                    new_content = original_content[:idx] + improved_code + original_content[idx + len(snippet):]
+                else:
+                    return {
+                        "modified": False, "file": str(p),
+                        "error": "Could not find snippet in original",
+                    }
+        if new_content == original_content:
+            return {
+                "modified": False, "file": str(p),
+                "error": "Claude made no changes",
+                "stdout": stdout[:300],
+            }
         try:
-            compile(improved_code, str(p), 'exec')
+            compile(new_content, str(p), "exec")
             syntax_valid = True
         except SyntaxError as e:
             return {
                 "modified": False, "file": str(p),
-                "error": f"Syntax error in improved code: {e}",
+                "error": f"Syntax error: {e}",
                 "syntax_valid": False,
             }
-
-        # For large files: only replace the BEGINNING of the file (first ~N chars)
-        # This preserves the rest of the file while improving the start
-        if file_size > 50000:
-            # Try to find where the improved code should end
-            # Use 800 chars as the improved version of the first 800 chars
-            new_content = improved_code + "\n" + original_content[len(snippet):]
-        else:
-            new_content = improved_code
-
-        # Backup
-        backup_path = p.with_suffix(p.suffix + ".bak")
+        backup_path = p.with_suffix(p.suffix + ".claude.bak")
         backup_path.write_text(original_content)
-
-        # Write improved version
         p.write_text(new_content)
-
-        lines_original = len(original_content.splitlines())
-        lines_improved = len(new_content.splitlines())
-
         return {
             "modified": True,
             "file": str(p),
             "backup": str(backup_path),
-            "improvements": [f"improved_{a}" for a in focus_areas],
-            "focus_areas": focus_areas,
-            "lines_original": lines_original,
-            "lines_improved": lines_improved,
-            "lines_changed": abs(lines_improved - lines_original),
+            "improvements": focus_areas,
+            "lines_original": len(original_content.splitlines()),
+            "lines_new": len(new_content.splitlines()),
+            "lines_changed": abs(len(new_content.splitlines()) - len(original_content.splitlines())),
             "syntax_valid": syntax_valid,
             "file_size": file_size,
-            "claude_output_preview": raw_output[:300],
+            "stdout_preview": stdout[:200],
         }
-
-    # ─── Task Management ────────────────────────────────────────────────────────
     def create_task(self, name: str, description: str = "", priority: Priority = Priority.MEDIUM,
                    tags: List[str] = None) -> Dict:
         """Create a new task"""
@@ -4478,77 +4103,51 @@ Return format:
     
     def execute_task(self, task: Dict, executor: Callable = None) -> Any:
         """Execute a task with full monitoring, archiving, and evolution"""
-        # Validate task input
-        if not isinstance(task, dict):
-            _log_error("execute_task", TypeError(f"task must be dict, got {type(task).__name__}"))
-            raise TypeError(f"task must be dict, got {type(task).__name__}")
-
         task_id = task.get("id", str(uuid.uuid4())[:8])
-        task_name = task.get("name", "unnamed_task")
-        approach = self.router.choose(task_name, task.get("metadata", {}))
-
+        approach = self.router.choose(task.get("name", ""), task.get("metadata", {}))
+        
         start_time = time.time()
         error = None
         result = None
-
+        
         try:
             if executor:
                 result = executor(task, approach)
             else:
-                result = f"Executed {task_name} with {approach}"
-
+                result = f"Executed {task.get('name')} with {approach}"
+            
             duration = time.time() - start_time
-            self.archive.log_success(task_name, approach, result, duration)
+            self.archive.log_success(task.get("name", ""), approach, result, duration)
             self.memory.store(f"success:{task_id}", {"result": str(result)[:200]}, priority=1.0, tier="warm")
             self._consecutive_failures = 0
-
+            
             # Layer 2 meta-analysis
             self._meta_analyze(task, approach, result, duration)
-
+            
             # Auto-evolution check
             if self._evolution_enabled:
                 self._maybe_evolve()
-
+            
             return result
 
-        except (TypeError, ValueError, KeyError, AttributeError, OSError, RuntimeError) as exc:
-            # Specific exceptions from task execution — log and re-raise
-            duration = time.time() - start_time
-            error = f"{type(exc).__name__}: {exc}"
-            self.archive.log_failure(task_name, approach, error, duration)
-            self.memory.store(f"failure:{task_id}", {"error": error[:200]}, priority=1.0, tier="hot")
-            self._consecutive_failures += 1
-
-            # Auto-heal
-            diagnosis = self.healing.diagnose(error, {"task": task})
-
-            # Layer 2 meta-analysis
-            self._meta_analyze(task, approach, None, duration, error)
-
-            # Force evolution on consecutive failures
-            if self._consecutive_failures >= self.config.evolution_failure_threshold:
-                self.evolution.evolve()
-
-            raise
-
-        except Exception as exc:
-            # Unexpected errors — log full traceback and re-raise
+        except Exception as e:
+            # Re-raise after logging and healing — task execution errors must propagate
             duration = time.time() - start_time
             error = traceback.format_exc()
-            self.archive.log_failure(task_name, approach, error, duration)
+            self.archive.log_failure(task.get("name", ""), approach, error, duration)
             self.memory.store(f"failure:{task_id}", {"error": error[:200]}, priority=1.0, tier="hot")
             self._consecutive_failures += 1
-
-            # Auto-heal with full context
+            
+            # Auto-heal
             diagnosis = self.healing.diagnose(error, {"task": task})
-
+            
             # Layer 2 meta-analysis
             self._meta_analyze(task, approach, None, duration, error)
-
+            
             # Force evolution on consecutive failures
             if self._consecutive_failures >= self.config.evolution_failure_threshold:
                 self.evolution.evolve()
-
+            
             raise
     
     def _meta_analyze(self, task: Dict, approach: str, result: Any,
@@ -4899,6 +4498,59 @@ Usage:
                 v = "***" if v else "not set"
             print(f"   {k}: {v}")
 
+    elif args.command == "loop":
+        if args.once:
+            # Run one cycle immediately
+            print("\n🔄 Running ONE evolution cycle...")
+            result = nx.loop.run_once()
+            print(f"\n✅ Cycle {result.get('cycle')} completed")
+            print(f"   Type: {result.get('type')}")
+            if result.get("topic"):
+                print(f"   Topic: {result.get('topic')}")
+            elif result.get("skill_name"):
+                print(f"   Skill: {result.get('skill_name')}")
+            elif result.get("winning_approach"):
+                print(f"   Spread: {result.get('winning_approach')}")
+            elif result.get("file_upgraded"):
+                print(f"   Upgraded: {result.get('file_upgraded')}")
+            elif result.get("old_dominant"):
+                print(f"   Bias broken: {result.get('old_dominant')} → {result.get('new_approaches')}")
+            if result.get("error"):
+                print(f"   Error: {result.get('error')}")
+        elif args.type:
+            # Force a specific type
+            print(f"\n🔄 Forcing evolution type: {args.type}")
+            result = nx.loop.force_type(args.type.upper())
+            if result.get("error"):
+                print(f"❌ Error: {result.get('error')}")
+            else:
+                print(f"✅ Cycle {result.get('cycle')}: {result.get('type')}")
+        else:
+            # Status
+            status = nx.loop.status()
+            print(f"""
+🔄 Autonomous Evolution Loop
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Running: {'YES ✅' if status['running'] else 'NO ❌'}
+   Total Cycles: {status['total_cycles']}
+   Last Run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(status['last_run_time'])) if status['last_run_time'] else 'Never'}
+   Last Type: {status['last_result_type'] or 'None'}
+   Types Done: {', '.join(status['evolution_types_done']) if status['evolution_types_done'] else 'None'}
+   Total Upgrades: {status['total_upgrades']}
+   Interval: {status['interval_seconds']}s
+
+   Recent Upgrades:
+""")
+            for u in status.get("recent_upgrades", []):
+                print(f"   • Cycle {u['cycle']}: {u['type']}")
+            print(f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Usage:
+   python3 NEXUS_OS_v3.py loop --once              # Run one cycle now
+   python3 NEXUS_OS_v3.py loop --type CRAWL_AND_LEARN  # Force specific type
+   python3 NEXUS_OS_v3.py loop                     # Status only
+""")
+    
     elif args.command == "filetype":
         if not args.path:
             print("Error: --path required for filetype command")
@@ -4916,8 +4568,8 @@ Usage:
                     try:
                         r = nx.identify_file(fp)
                         results[str(fp.relative_to(p))] = r
-                    except (OSError, PermissionError, FileNotFoundError, ValueError, KeyError) as exc:
-                        results[str(fp.relative_to(p))] = {"error": f"{type(exc).__name__}: {exc}"}
+                    except (OSError, RuntimeError, ValueError) as e:
+                        results[str(fp.relative_to(p))] = {"error": str(e)}
             
             print(f"\n🔍 File Type Detection — {p}")
             print(f"   Files scanned: {len(results)}")
@@ -5129,3 +4781,5 @@ Usage:
 
 if __name__ == "__main__":
     main()
+
+
