@@ -478,9 +478,9 @@ class NEXUSOSv6:
                     score_after=result.score_after,
                     files=[str(NEXUS_OS_PATH / "NEXUS_OS_v6.py")],
                 )
-                result.git_committed = ge_result.committed if hasattr(ge_result, 'committed') else False
+                result.git_committed = ge_result is not None and hasattr(ge_result, 'commit_hash')
                 if result.git_committed:
-                    print(f"  📦 Git committed: {getattr(ge_result, 'commit', 'OK')}")
+                    print(f"  📦 Git committed: {ge_result.commit_hash[:8]} ({len(ge_result.files_changed)} files)")
         except Exception as e:
             print(f"  ⚠️ Git commit failed: {e}")
 
