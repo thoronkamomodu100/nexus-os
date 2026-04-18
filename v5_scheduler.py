@@ -43,9 +43,21 @@ class ScheduledJob:
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        d["next_run_relative"] = self.next_run_relative()
-        return d
+        # Only serializable fields (exclude methods/computed)
+        return {
+            "id": self.id,
+            "name": self.name,
+            "schedule": self.schedule,
+            "command": self.command,
+            "enabled": self.enabled,
+            "last_run": self.last_run,
+            "next_run": self.next_run,
+            "run_count": self.run_count,
+            "success_count": self.success_count,
+            "failure_count": self.failure_count,
+            "last_result": self.last_result,
+            "created_at": self.created_at,
+        }
 
     def next_run_relative(self) -> str:
         if self.next_run <= 0:
@@ -145,7 +157,7 @@ class EvolutionScheduler:
         self.jobs: Dict[str, ScheduledJob] = {}
         self._load()
 
-        # Default jobs if empty
+        # Only init defaults if NO jobs loaded from JSON
         if not self.jobs:
             self._init_defaults()
 
@@ -156,21 +168,21 @@ class EvolutionScheduler:
                 id="hourly_evolution",
                 name="Hourly Evolution Cycle",
                 schedule="1h",
-                command="python3 NEXUS_OS_v3.py evolve",
+                command="cd /Users/a/NEXUS_OS && python3 NEXUS_OS_v6.py evolve",
                 enabled=True,
             ),
             ScheduledJob(
                 id="daily_deep_evolution",
                 name="Daily Deep Evolution",
                 schedule="daily",
-                command="python3 NEXUS_OS_v3.py evolve --deep",
+                command="cd /Users/a/NEXUS_OS && python3 NEXUS_OS_v6.py evolve --deep",
                 enabled=True,
             ),
             ScheduledJob(
                 id="health_check",
                 name="System Health Check",
                 schedule="30m",
-                command="python3 NEXUS_OS_v3.py status",
+                command="cd /Users/a/NEXUS_OS && python3 NEXUS_OS_v6.py status",
                 enabled=True,
             ),
         ]
@@ -344,9 +356,18 @@ class EvolutionScheduler:
         # Escape f-string braces with double {{}}
         script_content = f"""#!/usr/bin/env python3
 import sys, time, os
+from pathlib import Path
 sys.path.insert(0, "{NEXUS_OS_PATH}")
 os.chdir("{workdir}")
 os.environ["NEXUS_SCHEDULED"] = "1"
+
+LOG_FILE = Path.home() / ".hermes" / "nexus_scheduler.log"
+
+def log(msg):
+    with open(LOG_FILE, "a") as f:
+        f.write(msg + "\\n")
+        f.flush()
+    print(msg, flush=True)
 
 from v5_scheduler import EvolutionScheduler
 sched = EvolutionScheduler()
@@ -355,7 +376,7 @@ poll = {poll_interval}
 while True:
     results = sched.run_due_jobs(workdir="{workdir}", timeout=300, max_jobs=2)
     if results:
-        print(f"[nexus-daemon] Ran {{len(results)}} jobs at {{time.strftime('%Y-%m-%d %H:%M')}}", flush=True)
+        log(f"[nexus-daemon] Ran {{len(results)}} jobs at {{time.strftime('%Y-%m-%d %H:%M')}}")
     time.sleep(poll)
 """
         daemon_script.write_text(script_content)
