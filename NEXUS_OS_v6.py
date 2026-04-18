@@ -36,7 +36,7 @@ NEXUS_DB = NEXUS_HOME / "nexus_v6.db"
 # ── V6: Import v5 modules ────────────────────────────────────────────────────
 sys.path.insert(0, str(NEXUS_OS_PATH))
 
-from v5_persistence import PersistentStore, get_store
+from v5_persistence import PersistentStore, get_store, EvolutionLog, PersistedPattern
 from v5_web_crawler import ResearchPipeline
 from v5_git_evolution import GitEvolution
 from v5_scheduler import EvolutionScheduler
@@ -477,9 +477,9 @@ class NEXUSOSv6:
                     score_after=result.score_after,
                     files=[str(NEXUS_OS_PATH / "NEXUS_OS_v6.py")],
                 )
-                result.git_committed = ge_result.get("committed", False)
+                result.git_committed = ge_result.committed if hasattr(ge_result, 'committed') else False
                 if result.git_committed:
-                    print(f"  📦 Git committed: {ge_result.get('commit', 'OK')}")
+                    print(f"  📦 Git committed: {getattr(ge_result, 'commit', 'OK')}")
         except Exception as e:
             print(f"  ⚠️ Git commit failed: {e}")
 
