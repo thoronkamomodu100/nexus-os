@@ -596,19 +596,26 @@ class NEXUSOSv6:
         self.mcp_router = MCPToolRouter()
         self.code_fixer = IntelligentCodeFixer(self.nexus_core)
 
-        # Load patterns from SQLite into Archive
+        # Load patterns from SQLite into Archive via log_success/log_failure
         try:
             patterns = self.store.get_patterns()
             loaded = 0
             for p in (patterns or []):
-                self.nexus_core.archive.add_pattern(
-                    pattern_id=p.get("id", ""),
-                    pattern_type=p.get("type", "unknown"),
-                    description=p.get("description", ""),
-                    code=p.get("code", ""),
-                    success_rate=p.get("success_rate", 0.5),
-                    times_used=p.get("times_used", 1),
-                )
+                ptype = p.type if hasattr(p, 'type') else 'unknown'
+                task_name = (p.task_name if hasattr(p, 'task_name') else p.details)[:100] if hasattr(p, 'task_name') else str(p)[:100]
+                approach = (p.approach if hasattr(p, 'approach') else '')[:200]
+                if ptype == "success":
+                    self.nexus_core.archive.log_success(
+                        task_name=task_name,
+                        approach=approach,
+                        result=p.details if hasattr(p, 'details') else '',
+                    )
+                elif ptype == "failure":
+                    self.nexus_core.archive.log_failure(
+                        task_name=task_name,
+                        approach=approach,
+                        error=p.details if hasattr(p, 'details') else '',
+                    )
                 loaded += 1
             if loaded > 0:
                 print(f"  [v6] Loaded {loaded} patterns from SQLite")
