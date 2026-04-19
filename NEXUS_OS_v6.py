@@ -40,7 +40,8 @@ from v5_persistence import PersistentStore, get_store, EvolutionLog, PersistedPa
 from v5_web_crawler import ResearchPipeline
 from v5_git_evolution import GitEvolution
 from v5_scheduler import EvolutionScheduler
-from NEXUS_OS_v3 import NEXUSCore
+from codeflow_analyzer import analyze_directory, blast_radius_for_file
+from NEXUS_OS_v3 import NEXUSCore, ARCHIVE_DIR
 
 
 # ── V6: Voice Interface ───────────────────────────────────────────────────────
@@ -627,6 +628,70 @@ class NEXUSOSv6:
 
         print(f"  NEXUS OS v6 ready in {time.time()-t0:.1f}s (cycle {cycle})")
 
+    def _compute_score(self) -> dict:
+        """Compute real score from Archive data — not a fake cycle-count proxy."""
+        try:
+            ap = self.nexus_core.archive.get_patterns()
+            successes = ap.get("successes", 0)
+            failures = ap.get("failures", 0)
+            total = successes + failures
+
+            # Base: archive success rate (0.0 to 1.0)
+            base_rate = successes / total if total > 0 else 0.0
+
+            # Diversity: how many unique tasks have successes
+            task_stats = ap.get("task_stats", {})
+            diverse_tasks = sum(1 for t in task_stats.values() if t.get("success", 0) > 0)
+            diversity_bonus = min(diverse_tasks / 20, 1.0) * 0.2  # max +0.2
+
+            # Rolling improvement: compare recent vs older patterns (last 50 vs rest)
+            # This detects if recent cycles are improving or degrading
+            recent_threshold = max(1, total - 50)
+            recent_successes = 0
+            older_successes = 0
+            recent_failures = 0
+            older_failures = 0
+            for f in Path(ARCHIVE_DIR).glob("success_*.json"):
+                try:
+                    ts = json.loads(f.read_text()).get("timestamp", 0)
+                    if ts >= recent_threshold:
+                        recent_successes += 1
+                    else:
+                        older_successes += 1
+                except Exception:
+                    pass
+            for f in Path(ARCHIVE_DIR).glob("failure_*.json"):
+                try:
+                    ts = json.loads(f.read_text()).get("timestamp", 0)
+                    if ts >= recent_threshold:
+                        recent_failures += 1
+                    else:
+                        older_failures += 1
+                except Exception:
+                    pass
+            recent_total = recent_successes + recent_failures
+            older_total = older_successes + older_failures
+            recent_rate = recent_successes / recent_total if recent_total > 0 else 0.0
+            older_rate = older_successes / older_total if older_total > 0 else 0.5
+            improvement_delta = recent_rate - older_rate  # -1.0 to +1.0
+            improvement_bonus = improvement_delta * 0.3  # max ±0.3
+
+            raw = base_rate + diversity_bonus + improvement_bonus
+            score = max(0.0, min(raw, 1.5))  # clamp to reasonable range
+
+            return {
+                "score": round(score, 4),
+                "success_rate": round(base_rate, 4),
+                "diversity_bonus": round(diversity_bonus, 4),
+                "improvement_bonus": round(improvement_bonus, 4),
+                "recent_rate": round(recent_rate, 4),
+                "older_rate": round(older_rate, 4),
+                "total_archived": total,
+                "recent_cycles": recent_total,
+            }
+        except Exception as e:
+            return {"score": 0.0, "error": str(e)}
+
     def status(self) -> dict:
         """Return current status dict."""
         archive_total = len(self.nexus_core.archive.get_patterns())
@@ -635,10 +700,11 @@ class NEXUSOSv6:
         except Exception:
             git_commits = "0"
         sched_status = self.scheduler.status()
+        score_data = self._compute_score()
 
         return {
             "cycle": self.store.get_cycle(),
-            "score": self.nexus_core.loop.total_cycles * 0.1,  # proxy metric
+            "score": score_data.get("score", 0.0),
             "patterns": self.nexus_core.knowledge.stats()["total_nodes"],
             "knowledge": self.nexus_core.knowledge.stats()["total_nodes"],
             "archive": archive_total,
@@ -646,6 +712,7 @@ class NEXUSOSv6:
             "git_commits": int(git_commits) if git_commits.isdigit() else 0,
             "scheduler_jobs": len(sched_status["jobs"]),
             "ev_cycles": self.nexus_core.loop.total_cycles,
+            "score_breakdown": score_data,
         }
 
     def research(self, query: str, depth: str = "quick") -> dict:
@@ -675,7 +742,8 @@ class NEXUSOSv6:
         ev_type = types[cycle % len(types)]
         result.type = ev_type
 
-        score_before = self.nexus_core.loop.total_cycles * 0.1  # proxy metric
+        score_before_data = self._compute_score()
+        score_before = score_before_data.get("score", 0.0)
         result.score_before = score_before
 
         print(f"  📊 Score before: {score_before:.4f}")
@@ -709,7 +777,9 @@ class NEXUSOSv6:
             print(f"  ❌ Evolution error: {e}")
 
         # Score
-        score_after = self.nexus_core.loop.total_cycles * 0.1 + 0.1
+        # Score after — re-compute since evolution may have added new archive entries
+        score_after_data = self._compute_score()
+        score_after = score_after_data.get("score", 0.0)
         result.score_after = score_after
         result.score_delta = score_after - score_before
 
@@ -1050,7 +1120,7 @@ Return a JSON with keys: improvements (list of 3 specific suggestions), confiden
 def main():
     parser = argparse.ArgumentParser(description="NEXUS OS v6 — Full Autonomous Operating System")
     parser.add_argument("command", nargs="?", default="interactive",
-                        choices=["interactive", "status", "evolve", "research", "dashboard", "health", "schedule", "schedule-start", "schedule-stop"])
+                        choices=["interactive", "status", "evolve", "research", "dashboard", "health", "schedule", "schedule-start", "schedule-stop", "codeflow", "blast"])
     parser.add_argument("args", nargs="*", help="Arguments for the command")
     parser.add_argument("--deep", action="store_true", help="Deep evolution mode")
     parser.add_argument("--query", "-q", help="Research query")
@@ -1117,6 +1187,58 @@ def main():
     elif args.command == "schedule-stop":
         nexus.scheduler.stop_daemon()
         print("Scheduler stopped")
+
+    elif args.command == "codeflow":
+        target = args.args[0] if args.args else str(NEXUS_OS_PATH)
+        print(f"Analyzing: {target}")
+        result = analyze_directory(target)
+        stats = result["stats"]
+        print(f"\n📊 Architecture Stats:")
+        print(f"  Files: {stats['total_files']}")
+        print(f"  Connections: {stats['total_connections']}")
+        print(f"  Functions: {stats['total_functions']}")
+        print(f"  Folders: {stats['total_folders']}")
+
+        # Top blast radius
+        by_blast = sorted(
+            result["blast_radius"].items(),
+            key=lambda x: x[1]["total_affected"],
+            reverse=True
+        )[:8]
+        print(f"\n💥 Blast Radius (top files by impact):")
+        for fpath, info in by_blast:
+            if info["total_affected"] > 0:
+                print(f"  [{info['total_affected']} files] {fpath}")
+
+        # Save to DB
+        try:
+            nexus.store.save_codeflow(
+                repo_path=target,
+                files=result["files"],
+                connections=result["connections"],
+                blast_radius=result["blast_radius"],
+            )
+            print(f"\n✅ Saved to NEXUS archive")
+        except AttributeError:
+            # store doesn't have save_codeflow yet — that's ok
+            pass
+        except Exception as e:
+            print(f"\n⚠️ Could not save to archive: {e}")
+
+    elif args.command == "blast":
+        if not args.args:
+            print("Usage: python NEXUS_OS_v6.py blast <file_path>")
+        else:
+            file_path = args.args[0]
+            result = blast_radius_for_file(file_path, str(NEXUS_OS_PATH))
+            print(f"\n💥 Blast Radius for: {file_path}")
+            print(f"  Direct dependencies: {result.get('direct_deps', 'N/A')}")
+            print(f"  Direct dependents: {result.get('direct_dependents', 'N/A')}")
+            print(f"  Total affected: {result.get('total_affected', 'N/A')}")
+            if result.get("affected_files"):
+                print(f"  Affected files:")
+                for af in result["affected_files"]:
+                    print(f"    - {af}")
 
 
 if __name__ == "__main__":

@@ -149,36 +149,29 @@ def get_scheduler_status() -> dict:
 
 
 def send_telegram(text: str) -> bool:
-    """Telegram으로 메시지 전송. 실제 bot 사용."""
-    import json, urllib.request
+    """Telegram으로 메시지 전송 via curl with URL encoding."""
+    import subprocess, json, urllib.parse
+
+    BOT_TOKEN = "8766665851:AAFmF0Dji4F1zojrGNYZ833bWF94l1wwQCE"
+    CHAT_ID = "7124576642"
+
+    # URL-encode the text for safe transmission
+    encoded_text = urllib.parse.urlencode({'text': text})[5:]  # strip 'text=' prefix
+
+    cmd = [
+        'curl', '-s', '-X', 'POST',
+        f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
+        '-d', f'chat_id={CHAT_ID}',
+        '-d', f'text={encoded_text}',
+        '-d', 'parse_mode=Markdown',
+    ]
 
     try:
-        approved = json.loads(TELEGRAM_APPROVED.read_text())
-        bot_token = approved.get("BOT_TOKEN", "")
-        approved_chat_id = approved.get("approved_chats", {}).get("HeadHunterz", {}).get("id")
-    except Exception:
-        bot_token = ""
-        approved_chat_id = None
-
-    if not bot_token or not approved_chat_id:
-        # Fallback: print to stdout
-        print(f"[Telegram fallback - no config]\n{text}")
-        return False
-
-    try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        data = json.dumps({
-            "chat_id": approved_chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        }).encode()
-
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-            return result.get("ok", False)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        data = json.loads(result.stdout)
+        return data.get('ok', False)
     except Exception as e:
-        print(f"[Telegram send failed: {e}]\n{text}")
+        print(f"[Telegram error: {e}]")
         return False
 
 

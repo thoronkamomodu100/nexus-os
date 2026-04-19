@@ -5,7 +5,6 @@ Tracks evolution changes with git: commit history, branch per improvement,
 diff tracking, and version rollback.
 """
 
-from __future__ import annotations
 
 import json
 import subprocess
@@ -13,7 +12,6 @@ import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 
 # ─── Config ────────────────────────────────────────────────────────────────────
@@ -78,7 +76,8 @@ class GitEvolution:
     Can roll back, compare, and replay evolution history.
     """
 
-    def __init__(self, repo_path: Path = None):
+    def __init__(self, repo_path: Path = None) -> Any:
+        """Describe what __init__ does."""
         self.repo = repo_path or DEFAULT_REPO
         self.repo = self.repo.resolve()
         self._git_env = {
